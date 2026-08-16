@@ -85,7 +85,7 @@ def _routing_commands(topology: Topology, asset: Asset) -> list[str]:
 
 
 # iproute2導入をapt-get(Debian系)/apk(Alpine系)いずれでも動くよう自動判定する。
-# verum実データにはDebian系(debian:bullseye-slim, python:3.10-slim)とAlpine系
+# 前身(ot-ids-verum)の実データにはDebian系(debian:bullseye-slim, python:3.10-slim)とAlpine系
 # (nodered/node-red, timberio/vector:...-alpine)が混在しており、どちらかに
 # 決め打ちすると他方のイメージで確実に壊れる(Phase1決定事項#21)。
 _INSTALL_IPROUTE2 = (
@@ -136,7 +136,7 @@ def _assemble_command(
     # しまう(前身ot-ids-verumの罠ログ#052と同型: 補間機構がテキストレベルで
     # 素通しに働き、意図しない箇所にまで及ぶ)。Composeの仕様上、リテラルの
     # `$`は`$$`とエスケープする必要があるため、シェル変数参照・コマンド置換を
-    # 含む生成コマンド全体に対して機械的に適用する(Phase2決定事項#34)。
+    # 含む生成コマンド全体に対して機械的に適用する(Phase2決定事項#33)。
     escaped = joined.replace("$", "$$")
     return f'sh -c "{escaped}"'
 
@@ -174,7 +174,7 @@ def _mirroring_commands_for_asset(
     ③実際にNET_ADMINを保持している場合にのみ算出する。②③はルーティング
     (決定事項#22・#25)と同じ考え方——ゲートウェイ以外にミラーリング設定を
     仕込む意味は無く、NET_ADMINが無ければ`tc`コマンド自体が失敗して罠#005と
-    同型のクラッシュを招く(Phase2決定事項#33)。
+    同型のクラッシュを招く(Phase2決定事項#34)。
     """
     if instrumentation is None:
         return []

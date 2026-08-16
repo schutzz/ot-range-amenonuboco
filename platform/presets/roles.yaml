@@ -50,7 +50,7 @@ roles:
     # 構造化パイプライン(tshark+バルクローダー)実行ノード(Phase3決定事項#41)。
     # observerと同じくパケットキャプチャ権限が要るが、Elasticsearchへの書き込み
     # を担う点で責務が異なるため別ロールとして分離した。mirror_to+書き込み先
-    # セグメントへのマルチホーム接続を前提とする(Phase2決定事項#19の
+    # セグメントへのマルチホーム接続を前提とする(Phase1決定事項#19の
     # ip_forward=0ガードの対象になる)。
     cap_add: [NET_ADMIN, NET_RAW]
     sysctls: []

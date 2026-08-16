@@ -1,5 +1,5 @@
-"""マニフェストのtopology層から、防御側・統裁側向けの自己完結HTMLネットワーク図を
-生成する(Phase0決定事項#6の最小版、Phase1決定事項#25)。
+"""マニフェストから、防御側・統裁側向けの自己完結HTMLネットワーク図を生成する
+(Phase0決定事項#6、Phase1決定事項#26)。
 
 方針:
 - 外部ライブラリに依存しない(CDN読み込み無し、単一ファイルで完結)。SVGを
@@ -11,8 +11,13 @@
 - インタラクション(ホバー詳細・ズーム/パン)は、ネイティブの<title>要素と
   最小限のvanilla JSのみで実現する(Phase0決定事項#6の「自己完結HTML」
   「インタラクティブ」要件を、外部依存無しで満たすための最小構成)。
-- 観測カバレッジ・構造化・検知配置の情報は、対応する層が実装されるPhaseで
-  追加する(本レンダラはPhase1時点ではトポロジ情報のみを描画する)。
+
+描画する層(Phase0決定事項#6の5.2節が要求する情報、決定事項#50):
+- トポロジ(Phase1): セグメント・資産・接続
+- 観測カバレッジ(Phase2): どのセグメントがミラーされ、どこが死角か。統裁側の
+  環境把握に不可欠な情報であり、「観測外」を明示的に描くことを重視する
+- 構造化(Phase3): どのプロトコルがどのindexへ構造化されるか
+- 検知配置(Phase4以降): 未実装
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ _ROLE_COLORS: dict[str, str] = {
     "l3-router": "#c9782f",
     "detection-infra": "#4c8c4a",
     "observer": "#4a9c9c",
+    "structurer": "#5fb3d9",  # Phase3決定事項#41で追加したロール
     "eval-harness": "#8a7a4a",
     "attacker-external": "#b33f3f",
     "attacker-internal": "#b3703f",
@@ -45,13 +51,25 @@ _SEGMENT_KIND_COLORS: dict[str, str] = {
 }
 
 _SEGMENT_BORDER_COLOR = "#5a6a7a"
+# 観測状態ごとの枠線色。「観測外(死角)」を最も目立つ色にする——統裁側にとって
+# 死角の所在は最重要情報であり、"何も描かれていない"では伝わらないため。
+_OBSERVED_BORDER_COLOR = "#4fd1c5"
+_BLIND_BORDER_COLOR = "#d97757"
+_MIRROR_SINK_BORDER_COLOR = "#a78bfa"
+_MIRROR_FLOW_COLOR = "#4fd1c5"
 
 _VIEW_W = 1100
 _VIEW_H = 800
 _CENTER = (_VIEW_W / 2, _VIEW_H / 2 + 20)
 _SEGMENT_RADIUS = 300
-_SEGMENT_BOX_W = 230
-_SEGMENT_BOX_H = 140
+_SEGMENT_BOX_W = 250
+# 観測状態バッジを箱の下端に置くぶん、Phase1の140から拡げている
+_SEGMENT_BOX_H = 152
+_ASSET_COLS = 3
+_ASSET_COL_GAP = 78
+# 行間はラベル(ノード中心+22px)より広く取る。Phase1の30pxでは次の行の
+# ノードが前の行のラベルに重なった(実際にスクリーンショットで発覚)。
+_ASSET_ROW_GAP = 38
 _NODE_R = 9
 
 
@@ -75,54 +93,209 @@ def _asset_segment_names(asset: Asset) -> list[str]:
     return [net.segment for net in asset.networks]
 
 
+def _coverage(manifest: Manifest) -> tuple[set[str], str | None]:
+    """(観測対象セグメント名の集合, ミラー集約先セグメント名)を返す。
+
+    観測対象の判定は`Instrumentation.observed_segments`(オプトアウト方式、
+    Phase2決定事項#28)にそのまま委ねる。図側で判定ロジックを再実装すると、
+    生成器と図が別々の答えを出す余地が生まれ、「図と実態が乖離しない」という
+    Phase0決定事項#6の前提が崩れるため。
+    """
+    inst = manifest.instrumentation
+    if inst is None:
+        return set(), None
+    observed = {seg.name for seg in inst.observed_segments(manifest.topology)}
+    return observed, inst.mirror_to
+
+
+def _segment_border(seg_name: str, observed: set[str], mirror_to: str | None) -> tuple[str, float]:
+    if mirror_to is None:
+        return _SEGMENT_BORDER_COLOR, 1.5
+    if seg_name == mirror_to:
+        return _MIRROR_SINK_BORDER_COLOR, 2.0
+    if seg_name in observed:
+        return _OBSERVED_BORDER_COLOR, 2.0
+    return _BLIND_BORDER_COLOR, 2.0
+
+
+def _coverage_badge(seg_name: str, observed: set[str], mirror_to: str | None) -> str:
+    if mirror_to is None:
+        return ""
+    if seg_name == mirror_to:
+        return "◎ ミラー集約先"
+    if seg_name in observed:
+        return "◉ 観測対象"
+    return "✕ 観測外（死角）"
+
+
+def _mirror_flow_lines(
+    seg_pos: dict[str, tuple[float, float]], observed: set[str], mirror_to: str | None
+) -> list[str]:
+    """観測対象セグメント → ミラー集約先セグメント へのフロー線。
+    箱の中心同士を結ぶと箱の下に隠れるため、両端を箱の外側へ寄せる。
+    """
+    if mirror_to is None or mirror_to not in seg_pos:
+        return []
+    mx, my = seg_pos[mirror_to]
+    lines: list[str] = []
+    for name in sorted(observed):
+        if name not in seg_pos:
+            continue
+        sx, sy = seg_pos[name]
+        dx, dy = mx - sx, my - sy
+        dist = math.hypot(dx, dy) or 1.0
+        ux, uy = dx / dist, dy / dist
+        # 箱の外側で始まり、外側で終わるよう寄せる(半幅125/半高76より少し外)。
+        # 内側に入り込むと、矢印の先端が箱の中の資産ノードと重なって読めなくなる。
+        x1, y1 = sx + ux * 132, sy + uy * 84
+        x2, y2 = mx - ux * 132, my - uy * 84
+        lines.append(
+            f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
+            f'class="mirror-flow" marker-end="url(#mirror-arrow)">'
+            f"<title>{_esc(name)} のトラフィックが {_esc(mirror_to)} へミラーされる</title>"
+            f"</line>"
+        )
+    return lines
+
+
+def _layer_note(manifest: Manifest) -> str:
+    """図がどの層まで描画しているかを示す注記。マニフェストに実際に宣言されて
+    いる層だけを挙げる(トポロジしか無いマニフェストで「観測カバレッジ表示」と
+    書くと、それこそ図と実態が食い違うため)。
+    """
+    layers = ["トポロジ"]
+    if manifest.instrumentation is not None:
+        layers.append("観測カバレッジ")
+    if manifest.structuring is not None:
+        layers.append("構造化")
+    return " / ".join(layers)
+
+
+def _info_panel_html(manifest: Manifest, observed: set[str], mirror_to: str | None) -> str:
+    """計装・構造化の要約パネル。統裁側が「どこが見えていて、何が構造化されて
+    いるか」を図から離れずに読めるようにする(Phase0決定事項#6の5.2節)。
+    """
+    blocks: list[str] = []
+
+    if mirror_to is not None:
+        total = len(manifest.topology.segments)
+        # mirror_to自身は観測対象に含まれない(自己ミラーはしない)ため、
+        # カバレッジの母数から外して数える。
+        candidates = total - 1
+        blind = [
+            seg.name
+            for seg in manifest.topology.segments
+            if seg.name != mirror_to and seg.name not in observed
+        ]
+        blind_html = (
+            f'<div class="info-blind">死角: {_esc(", ".join(blind))}</div>'
+            if blind
+            else '<div class="info-ok">死角なし</div>'
+        )
+        blocks.append(
+            '<div class="info-block">'
+            '<div class="info-title">計装（観測カバレッジ）</div>'
+            f'<div class="info-row"><span>ミラー集約先</span><code>{_esc(mirror_to)}</code></div>'
+            f'<div class="info-row"><span>観測対象</span>'
+            f"<code>{len(observed)} / {candidates} セグメント</code></div>"
+            f"{blind_html}"
+            "</div>"
+        )
+
+    structuring = manifest.structuring
+    if structuring is not None and structuring.protocols:
+        rows = "".join(
+            f'<div class="info-row"><span>{_esc(p.name)}</span>'
+            f"<code>{_esc(p.output_index)}</code></div>"
+            for p in structuring.protocols
+        )
+        blocks.append(
+            '<div class="info-block">'
+            f'<div class="info-title">構造化（{_esc(structuring.engine)}）</div>'
+            f"{rows}"
+            "</div>"
+        )
+
+    if not blocks:
+        return ""
+    return f'<div class="info-panel">{"".join(blocks)}</div>'
+
+
 def render_network_diagram(manifest: Manifest) -> str:
     topology: Topology = manifest.topology
     seg_pos = _segment_positions(topology.segments)
+    observed, mirror_to = _coverage(manifest)
 
     svg_parts: list[str] = []
+
+    # --- ミラーフロー線(セグメント箱より先に描き、箱の下に潜らせる) ---
+    svg_parts.extend(_mirror_flow_lines(seg_pos, observed, mirror_to))
 
     # --- セグメント箱 ---
     for seg in topology.segments:
         cx, cy = seg_pos[seg.name]
         x, y = cx - _SEGMENT_BOX_W / 2, cy - _SEGMENT_BOX_H / 2
         fill = _SEGMENT_KIND_COLORS.get(seg.kind, "rgba(120,120,120,0.14)")
+        border_color, border_w = _segment_border(seg.name, observed, mirror_to)
+        badge = _coverage_badge(seg.name, observed, mirror_to)
+        badge_el = (
+            f'<text x="{cx:.1f}" y="{y + _SEGMENT_BOX_H - 8:.1f}" class="seg-badge" '
+            f'text-anchor="middle" fill="{border_color}">{_esc(badge)}</text>'
+            if badge
+            else ""
+        )
+        title = f"{seg.name} ({seg.cidr}) — {seg.kind}"
+        if badge:
+            title += f"\n{badge}"
         svg_parts.append(
             f'<g class="segment">'
             f'<rect x="{x:.1f}" y="{y:.1f}" width="{_SEGMENT_BOX_W}" height="{_SEGMENT_BOX_H}" '
-            f'rx="10" fill="{fill}" stroke="{_SEGMENT_BORDER_COLOR}" stroke-width="1.5">'
-            f"<title>{_esc(seg.name)} ({_esc(seg.cidr)}) — {_esc(seg.kind)}</title>"
+            f'rx="10" fill="{fill}" stroke="{border_color}" stroke-width="{border_w}">'
+            f"<title>{_esc(title)}</title>"
             f"</rect>"
             f'<text x="{cx:.1f}" y="{y + 18:.1f}" class="seg-label" text-anchor="middle">'
             f"{_esc(seg.name)}</text>"
             f'<text x="{cx:.1f}" y="{y + 34:.1f}" class="seg-sub" text-anchor="middle">'
             f"{_esc(seg.cidr)} · {_esc(seg.kind)}</text>"
+            f"{badge_el}"
             f"</g>"
         )
 
     # --- 資産の配置座標を計算 ---
     asset_positions: dict[str, tuple[float, float]] = {}
-    single_homed_slot: dict[str, int] = {}  # segment名 -> 次に置くスロット番号
 
+    # 単一接続資産は所属セグメント箱の中に並べる。各行は箱の中心に対して
+    # 左右対称に配置する(端から詰めると、最終行が1件だけのときに大きく左へ
+    # 寄り、長いラベルが箱の外へはみ出す)。
+    single_homed: dict[str, list[Asset]] = {}
     for asset in topology.assets:
         seg_names = _asset_segment_names(asset)
-        if len(seg_names) == 1:
-            seg_name = seg_names[0]
-            cx, cy = seg_pos[seg_name]
-            slot = single_homed_slot.get(seg_name, 0)
-            single_homed_slot[seg_name] = slot + 1
-            col = slot % 3
-            row = slot // 3
-            ax = cx - _SEGMENT_BOX_W / 2 + 40 + col * 75
-            ay = cy - _SEGMENT_BOX_H / 2 + 60 + row * 30
-            asset_positions[asset.name] = (ax, ay)
+        if len(seg_names) == 1 and seg_names[0] in seg_pos:
+            single_homed.setdefault(seg_names[0], []).append(asset)
+
+    for seg_name, members in single_homed.items():
+        cx, cy = seg_pos[seg_name]
+        top = cy - _SEGMENT_BOX_H / 2 + 58
+        for row_start in range(0, len(members), _ASSET_COLS):
+            row_members = members[row_start : row_start + _ASSET_COLS]
+            row_index = row_start // _ASSET_COLS
+            offset = (len(row_members) - 1) / 2
+            for i, asset in enumerate(row_members):
+                ax = cx + (i - offset) * _ASSET_COL_GAP
+                ay = top + row_index * _ASSET_ROW_GAP
+                asset_positions[asset.name] = (ax, ay)
+
+    # マルチホーム資産: 接続する全セグメント箱の重心に配置
+    for asset in topology.assets:
+        if asset.name in asset_positions:
+            continue
+        seg_names = _asset_segment_names(asset)
+        xs = [seg_pos[s][0] for s in seg_names if s in seg_pos]
+        ys = [seg_pos[s][1] for s in seg_names if s in seg_pos]
+        if xs and ys:
+            asset_positions[asset.name] = (sum(xs) / len(xs), sum(ys) / len(ys))
         else:
-            # マルチホーム資産: 接続する全セグメント箱の重心に配置
-            xs = [seg_pos[s][0] for s in seg_names if s in seg_pos]
-            ys = [seg_pos[s][1] for s in seg_names if s in seg_pos]
-            if xs and ys:
-                asset_positions[asset.name] = (sum(xs) / len(xs), sum(ys) / len(ys))
-            else:
-                asset_positions[asset.name] = _CENTER
+            asset_positions[asset.name] = _CENTER
 
     # --- マルチホーム資産→各セグメント箱へのスポーク線(資産ノードより先に描画) ---
     for asset in topology.assets:
@@ -148,6 +321,12 @@ def render_network_diagram(manifest: Manifest) -> str:
             f"{net.segment}={net.ip or '(動的割当)'}" for net in asset.networks
         )
         title = f"{asset.name} [{asset.role}]\n{ip_list}"
+        if asset.role == "structurer" and manifest.structuring is not None:
+            protos = ", ".join(
+                f"{p.name}→{p.output_index}" for p in manifest.structuring.protocols
+            )
+            if protos:
+                title += f"\n構造化: {protos}"
         multihomed_ring = (
             f'<circle cx="{ax:.1f}" cy="{ay:.1f}" r="{_NODE_R + 4}" fill="none" '
             f'stroke="{color}" stroke-width="1.5" opacity="0.5" />'
@@ -168,13 +347,30 @@ def render_network_diagram(manifest: Manifest) -> str:
 
     svg_body = "\n".join(svg_parts)
 
+    # 凡例は、実際にこのマニフェストに登場するロールだけを出す(使われていない
+    # ロールまで並べると、図から読み取れる情報と凡例が一致しなくなるため)。
+    used_roles = [r for r in _ROLE_COLORS if any(a.role == r for a in topology.assets)]
     legend_items = "".join(
-        f'<div class="legend-item"><span class="dot" style="background:{color}"></span>{_esc(role)}</div>'
-        for role, color in _ROLE_COLORS.items()
+        f'<div class="legend-item"><span class="dot" style="background:{_ROLE_COLORS[role]}">'
+        f"</span>{_esc(role)}</div>"
+        for role in used_roles
     )
+    if mirror_to is not None:
+        legend_items += (
+            '<div class="legend-sep"></div>'
+            f'<div class="legend-item"><span class="bar" style="background:{_OBSERVED_BORDER_COLOR}">'
+            "</span>観測対象</div>"
+            f'<div class="legend-item"><span class="bar" style="background:{_MIRROR_SINK_BORDER_COLOR}">'
+            "</span>ミラー集約先</div>"
+            f'<div class="legend-item"><span class="bar" style="background:{_BLIND_BORDER_COLOR}">'
+            "</span>観測外（死角）</div>"
+        )
+
+    info_panel = _info_panel_html(manifest, observed, mirror_to)
 
     title_text = _esc(manifest.metadata.name)
     desc_text = _esc(manifest.metadata.description or "")
+    layer_note = _layer_note(manifest)
 
     return f"""<!doctype html>
 <html lang="ja">
@@ -213,8 +409,49 @@ def render_network_diagram(manifest: Manifest) -> str:
   svg {{ display: block; }}
   .seg-label {{ fill: var(--text); font-size: 13px; font-weight: 600; }}
   .seg-sub {{ fill: var(--muted); font-size: 10px; }}
+  .seg-badge {{ font-size: 10px; font-weight: 600; }}
   .asset-label {{ fill: var(--text); font-size: 10px; }}
   .spoke {{ stroke: #4a5568; stroke-width: 1.2; opacity: 0.6; }}
+  .mirror-flow {{
+    stroke: {_MIRROR_FLOW_COLOR};
+    stroke-width: 1.4;
+    stroke-dasharray: 6 5;
+    opacity: 0.55;
+  }}
+  .info-panel {{
+    position: fixed;
+    left: 16px;
+    top: 106px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 12px;
+    min-width: 232px;
+  }}
+  .info-block + .info-block {{
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }}
+  .info-title {{
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--text);
+  }}
+  .info-row {{
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 3px 0;
+    color: var(--muted);
+  }}
+  .info-row code {{
+    color: var(--text);
+    font-size: 11px;
+  }}
+  .info-blind {{ margin-top: 5px; color: {_BLIND_BORDER_COLOR}; }}
+  .info-ok {{ margin-top: 5px; color: {_OBSERVED_BORDER_COLOR}; }}
   .legend {{
     position: fixed;
     right: 16px;
@@ -227,21 +464,30 @@ def render_network_diagram(manifest: Manifest) -> str:
   }}
   .legend-item {{ display: flex; align-items: center; gap: 6px; margin: 3px 0; }}
   .dot {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; }}
+  .bar {{ width: 10px; height: 3px; border-radius: 2px; display: inline-block; }}
+  .legend-sep {{ height: 1px; background: var(--border); margin: 7px 0; }}
 </style>
 </head>
 <body>
 <header>
   <h1>Amenonuboco Network Diagram — {title_text}</h1>
-  <p>{desc_text}（トポロジ層のみ・Phase 1時点。マウスホイールでズーム、ドラッグでパン。ノードにカーソルを合わせると詳細を表示）</p>
+  <p>{desc_text}（描画: {layer_note}。マウスホイールでズーム、ドラッグでパン。ノード・セグメントにカーソルを合わせると詳細を表示）</p>
 </header>
 <div id="canvas-wrap">
   <svg id="diagram" viewBox="0 0 {_VIEW_W} {_VIEW_H}" width="100%" height="100%"
        preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="mirror-arrow" viewBox="0 0 10 10" refX="9" refY="5"
+              markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="{_MIRROR_FLOW_COLOR}" opacity="0.7" />
+      </marker>
+    </defs>
     <g id="viewport">
 {svg_body}
     </g>
   </svg>
 </div>
+{info_panel}
 <div class="legend">{legend_items}</div>
 <script>
 (function () {{

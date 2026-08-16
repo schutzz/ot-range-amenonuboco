@@ -36,9 +36,9 @@ topology:          # ① セグメント・資産・ルーティング
   routing: {...}
   assets: [...]
 
-instrumentation:   # ② 観測対象の列挙
+instrumentation:   # ② 観測（ミラーリング）
   mirror_to: ...
-  observe: [...]
+  exclude: [...]
 
 structuring:       # ③ 構造化（tshark既定）
   engine: tshark
@@ -180,22 +180,20 @@ topology:
 
 ## 3. ② 計装層（`instrumentation`）
 
-「どのセグメントを観測するか」を列挙するだけです。
+ミラー先の観測用セグメントを指定するだけです。**観測対象は既定で「`mirror_to` 自身を除く全セグメント」**であり、除外したいセグメントがある場合だけ `exclude` に書きます（オプトアウト方式）。
 
 ```yaml
 instrumentation:
   mirror_to: mirror_link      # ミラー先の観測用セグメント
-  observe:
-    - cc_lan
-    - wan_link
-    - sub_a_l2_lan
-    - sub_b_lan
+  exclude: []                 # 観測対象から除外するセグメント名（既定は空＝全セグメント観測）
 ```
 
 | フィールド | 必須 | 説明 |
 |---|---|---|
 | `mirror_to` | ✅ | ミラーしたトラフィックを集約する観測用セグメント |
-| `observe` | ✅ | 観測対象セグメントの配列 |
+| `exclude` | ✕ | 観測対象から除外するセグメント名の配列（既定 `[]`）。`mirror_to` 自身は指定不要（常に自動で除外される） |
+
+> **なぜ列挙ではなく除外なのか**：観測対象をマニフェストに列挙させる方式（オプトイン）だと、`topology.segments` にセグメントを追加したときに計装層への追記を忘れる余地が残ります。前身 `ot-ids-verum` では実際にこれが起き、新セグメントのトラフィックが2日間まったく観測されないまま気づかれませんでした。`topology.segments` の全セグメントを既定で観測対象にすることで、**「追記を忘れる」という選択肢自体を無くしています**。
 
 **プロビジョナが担うこと（マニフェストに書かないこと）**：
 - IPアドレスからのインターフェース名の逆引き（コンテナ再作成での名前シャッフル対策）
@@ -258,7 +256,8 @@ structuring:
 | `ot-asset` | 被害者となりうるOT資産（PLC/RTU/HMI/IED/SCADAマスター） | cc_scada_master, sub_b_rtu_hmi, sub_b_plc_01, sub_a_ied_01 |
 | `l3-router` | セグメント間ルータ（`ip_forward` 有効） | wan_router |
 | `detection-infra` | 検知基盤（取り込み・保存・可視化・検知 sidecar） | vector, elasticsearch, grafana, 各 sidecar |
-| `observer` | 観測ノード（tshark/Zeek/Suricata） | zeek_tap, suricata_ids |
+| `observer` | 観測ノード（生パケットをそのまま確認する用途、tcpdump 等） | zeek_tap, suricata_ids |
+| `structurer` | 構造化パイプライン実行ノード（tshark ＋ バルクローダー、§4） | （前身では Vector＋Zeek が担っていた役割） |
 | `eval-harness` | 正解ラベル源（評価専用、§6参照） | oob_redis, oob_webdis |
 | `attacker-external` | 境界外の攻撃者 | external_attacker |
 | `attacker-internal` | 内部に置いた踏み台攻撃者 | red-team |
@@ -409,7 +408,7 @@ topology:
 
 instrumentation:
   mirror_to: mirror_link
-  observe: [ cc_lan, wan_link, sub_b_lan, sub_a_l2_lan ]
+  exclude: []   # 既定で mirror_link 以外の全セグメントが観測対象になる
 
 structuring:
   engine: tshark
