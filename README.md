@@ -1,6 +1,6 @@
 # Amenonuboco — Cyber Range as a Code
 
-![status](https://img.shields.io/badge/status-Phase%200%20(Design)-orange)
+![status](https://img.shields.io/badge/status-Phase%201%20(Provisioner)-brightgreen)
 
 > **天沼矛（あめのぬぼこ）** — マニフェスト1枚から、OT/ICS向けサイバーレンジ（攻撃対象 + 計装 + 検知パイプライン）を動的にプロビジョニングするためのプラットフォーム。
 
@@ -34,9 +34,28 @@ ot-range-amenonuboco/
 └── docs/         公開ドキュメント
 ```
 
+## 現在のテスト品
+
+マニフェスト1枚（[`manifests/power-grid-reference.yaml`](./manifests/power-grid-reference.yaml)、前身 `ot-ids-verum` の電力網ラボのトポロジを再現したリファレンススライス）から、下記2つを生成できます。
+
+1. `docker-compose.yml` — 実際に `docker compose up` で7コンテナが起動し、マルチホーム資産（ゲートウェイ）を経由したクロスセグメントルーティングが機能することを実機確認済みです。
+2. 防御側・統裁側向けのHTMLネットワーク図（外部ライブラリ非依存の自己完結ファイル、ズーム/パン・ノードホバーでの詳細表示に対応）：
+
+![Amenonubocoが生成したネットワーク図の例](./docs/images/network-diagram-preview.png)
+
+セグメントを円周上の箱として配置し、複数セグメントに接続するゲートウェイ資産（`wan_router`）は中心に置いて各セグメントへスポーク線を伸ばす構成です。同じマニフェストから生成されるため、実環境の構成と図が乖離しません。
+
+再現する場合：
+
+```bash
+cd platform
+python cli.py provision ../manifests/power-grid-reference.yaml   # docker-compose.yml を生成
+python cli.py diagram   ../manifests/power-grid-reference.yaml   # ネットワーク図(HTML)を生成
+```
+
 ## ステータス
 
-**Phase 0（設計）** — マニフェストスキーマの設計に着手した段階です。まず前身 `ot-ids-verum` の既存環境を、マニフェスト1枚で表現できるかどうかの逆算設計から始めています。
+**Phase 1（トポロジ層プロビジョナ）完了** — マニフェストのトポロジ層（セグメント・資産・ルーティング）から実環境とネットワーク図を生成する最小プロビジョナが動作しています。次はPhase 2（計装層の自動生成）に着手予定です。
 
 ## ライセンス
 

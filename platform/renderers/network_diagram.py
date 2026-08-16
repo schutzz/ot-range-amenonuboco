@@ -235,7 +235,8 @@ def render_network_diagram(manifest: Manifest) -> str:
   <p>{desc_text}（トポロジ層のみ・Phase 1時点。マウスホイールでズーム、ドラッグでパン。ノードにカーソルを合わせると詳細を表示）</p>
 </header>
 <div id="canvas-wrap">
-  <svg id="diagram" viewBox="0 0 {_VIEW_W} {_VIEW_H}" xmlns="http://www.w3.org/2000/svg">
+  <svg id="diagram" viewBox="0 0 {_VIEW_W} {_VIEW_H}" width="100%" height="100%"
+       preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
     <g id="viewport">
 {svg_body}
     </g>
