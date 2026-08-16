@@ -91,6 +91,17 @@ class Asset(BaseModel):
     networks: list[AssetNetwork] = Field(min_length=1)
     overrides: AssetOverrides = Field(default_factory=AssetOverrides)
 
+    def ip_on_segment(self, segment_name: str) -> Optional[str]:
+        """指定セグメント上でのこの資産の静的IPを返す(無ければNone、動的割当や
+        非接続の場合)。generators/compose.py・generators/mirroring.py の両方が
+        参照する共通ヘルパー(決定事項#29の動的解決の起点になる、gatewayの
+        既知IPを求める処理で使う)。
+        """
+        for net in self.networks:
+            if net.segment == segment_name:
+                return net.ip
+        return None
+
 
 class Routing(BaseModel):
     """gateway で指定した資産(role=l3-router)を経由し、各資産が自セグメント以外の
@@ -167,8 +178,8 @@ class Topology(BaseModel):
 
 
 class Manifest(BaseModel):
-    """マニフェスト全体。Phase 1では topology 以外の層は生データのまま保持するのみ
-    (バリデーションもモデル化もしない)。
+    """マニフェスト全体。structuring/detection/attack はまだモデル化するまで、
+    未検証の生データ(dict)として保持するのみ。instrumentationはPhase2でモデル化した。
     """
 
     model_config = {"populate_by_name": True}
@@ -177,9 +188,24 @@ class Manifest(BaseModel):
     kind: Literal["CyberRange"]
     metadata: Metadata
     topology: Topology
+    instrumentation: Optional["Instrumentation"] = None
 
-    # Phase 2以降でモデル化するまでの暫定(未検証の生データ)
-    instrumentation: Optional[dict] = None
+    # Phase 3以降でモデル化するまでの暫定(未検証の生データ)
     structuring: Optional[dict] = None
     detection: Optional[dict] = None
     attack: Optional[dict] = None
+
+    @model_validator(mode="after")
+    def _validate_instrumentation_references(self) -> "Manifest":
+        if self.instrumentation is not None:
+            from .instrumentation import validate_instrumentation
+
+            validate_instrumentation(self.instrumentation, self.topology)
+        return self
+
+
+# 循環import回避のための遅延解決(instrumentation.py が topology.py の Segment/Topology
+# を参照するため、Manifestの型ヒントは文字列参照にしておき、ここで解決する)。
+from .instrumentation import Instrumentation  # noqa: E402
+
+Manifest.model_rebuild()

@@ -1,3 +1,4 @@
+from .instrumentation import Instrumentation
 from .loader import ManifestLoadError, load_manifest
 from .presets import (
     PresetLoadError,
@@ -25,6 +26,7 @@ __all__ = [
     "AssetNetwork",
     "AssetOverrides",
     "AssetRole",
+    "Instrumentation",
     "Manifest",
     "ManifestLoadError",
     "Metadata",

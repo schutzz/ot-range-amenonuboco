@@ -15,7 +15,17 @@ from typing import Any
 
 import yaml
 
-from schema import Asset, Manifest, RolePresets, Segment, Topology, resolve_effective_attributes
+from schema import (
+    Asset,
+    Instrumentation,
+    Manifest,
+    RolePresets,
+    Segment,
+    Topology,
+    resolve_effective_attributes,
+)
+
+from .mirroring import MirroringGenerationError, generate_mirroring_commands
 
 
 class ComposeGenerationError(Exception):
@@ -34,17 +44,14 @@ def _network_block(segments: list[Segment]) -> dict[str, Any]:
 
 
 def _gateway_ip_on_segment(gateway: Asset, segment_name: str) -> str:
-    for net in gateway.networks:
-        if net.segment == segment_name:
-            if net.ip is None:
-                raise ComposeGenerationError(
-                    f"gateway asset '{gateway.name}' has no static ip on segment "
-                    f"'{segment_name}'; routing generation requires a fixed gateway ip"
-                )
-            return net.ip
-    raise ComposeGenerationError(
-        f"gateway asset '{gateway.name}' is not connected to segment '{segment_name}'"
-    )
+    ip = gateway.ip_on_segment(segment_name)
+    if ip is None:
+        raise ComposeGenerationError(
+            f"gateway asset '{gateway.name}' has no static ip on segment "
+            f"'{segment_name}' (either not connected, or ip left for dynamic "
+            f"assignment); routing generation requires a fixed gateway ip"
+        )
+    return ip
 
 
 def _routing_commands(topology: Topology, asset: Asset) -> list[str]:
@@ -81,14 +88,19 @@ _INSTALL_IPROUTE2 = (
 )
 
 
-def _assemble_command(routing_cmds: list[str], app_command: str | None) -> str | None:
-    """ルーティング + アプリ起動 を1本のshellコマンドに合成する。
+def _assemble_command(
+    mirroring_cmds: list[str], routing_cmds: list[str], app_command: str | None
+) -> str | None:
+    """ミラーリング設定 + ルーティング + アプリ起動 を1本のshellコマンドに合成する。
+
+    実行順序はミラーリング→ルーティング→アプリ起動に固定する(Phase2決定事項#31、
+    観測基盤を経路設定より先に整えておく)。
 
     **overrides.command が明示されている資産にのみ適用する**(呼び出し元
-    _service_block が routing_cmds の算出自体をこの条件で制御する)。
-    app_command が無ければNoneを返し、イメージ既定のENTRYPOINT/CMDを一切
-    上書きしない(elasticsearch/vector等、ベースイメージ自身の起動スクリプトに
-    依存するコンテナを壊さないため。Phase1決定事項#22)。
+    _service_block が routing_cmds/mirroring_cmds の算出自体をこの条件で制御
+    する)。app_command が無ければNoneを返し、イメージ既定のENTRYPOINT/CMDを
+    一切上書きしない(elasticsearch/vector等、ベースイメージ自身の起動スクリプト
+    に依存するコンテナを壊さないため。Phase1決定事項#22)。
 
     シェルは`sh`を使う(bashが無いAlpine系イメージでも動くように)。
     """
@@ -96,13 +108,21 @@ def _assemble_command(routing_cmds: list[str], app_command: str | None) -> str |
         return None
 
     parts: list[str] = []
-    if routing_cmds:
+    if mirroring_cmds or routing_cmds:
         parts.append(_INSTALL_IPROUTE2)
+        parts.extend(mirroring_cmds)
         parts.extend(routing_cmds)
     parts.append(app_command)
 
     joined = " && ".join(parts)
-    return f'sh -c "{joined}"'
+    # Docker Compose自体が command 文字列中の $VAR / $(...) を「Composeの変数
+    # 展開対象」として解釈してしまい、シェルに渡る前に空文字列へ置換して
+    # しまう(前身ot-ids-verumの罠ログ#052と同型: 補間機構がテキストレベルで
+    # 素通しに働き、意図しない箇所にまで及ぶ)。Composeの仕様上、リテラルの
+    # `$`は`$$`とエスケープする必要があるため、シェル変数参照・コマンド置換を
+    # 含む生成コマンド全体に対して機械的に適用する(Phase2決定事項#34)。
+    escaped = joined.replace("$", "$$")
+    return f'sh -c "{escaped}"'
 
 
 _OBSERVATION_KIND = "observation"
@@ -127,7 +147,34 @@ def _needs_mirror_ip_forward_guard(topology: Topology, asset: Asset) -> bool:
     return _OBSERVATION_KIND in kinds
 
 
-def _service_block(asset: Asset, topology: Topology, presets: RolePresets) -> dict[str, Any]:
+def _mirroring_commands_for_asset(
+    asset: Asset,
+    topology: Topology,
+    instrumentation: Instrumentation | None,
+    resolved_cap_add: list[str],
+) -> list[str]:
+    """ミラーリング設定は、①instrumentation層が宣言されており、②この資産が
+    ゲートウェイ(mirroring実行点、generators/mirroring.py参照)であり、
+    ③実際にNET_ADMINを保持している場合にのみ算出する。②③はルーティング
+    (決定事項#22・#25)と同じ考え方——ゲートウェイ以外にミラーリング設定を
+    仕込む意味は無く、NET_ADMINが無ければ`tc`コマンド自体が失敗して罠#005と
+    同型のクラッシュを招く(Phase2決定事項#33)。
+    """
+    if instrumentation is None:
+        return []
+    if topology.routing is None or asset.name != topology.routing.gateway:
+        return []
+    if "NET_ADMIN" not in resolved_cap_add:
+        return []
+    return generate_mirroring_commands(topology, instrumentation)
+
+
+def _service_block(
+    asset: Asset,
+    topology: Topology,
+    presets: RolePresets,
+    instrumentation: Instrumentation | None,
+) -> dict[str, Any]:
     resolved = resolve_effective_attributes(asset, presets)
 
     # container_name をあえて設定しない(Phase1決定事項#24)。前身(ot-ids-verum)は
@@ -166,7 +213,12 @@ def _service_block(asset: Asset, topology: Topology, presets: RolePresets) -> di
     # 繋いだ後続のアプリ起動コマンドごと道連れにしてしまう(罠ログ#005)。
     needs_routing = bool(resolved.command) and "NET_ADMIN" in resolved.cap_add
     routing_cmds = _routing_commands(topology, asset) if needs_routing else []
-    command = _assemble_command(routing_cmds, resolved.command)
+    mirroring_cmds = (
+        _mirroring_commands_for_asset(asset, topology, instrumentation, resolved.cap_add)
+        if resolved.command
+        else []
+    )
+    command = _assemble_command(mirroring_cmds, routing_cmds, resolved.command)
     if command:
         service["command"] = command
 
@@ -175,15 +227,22 @@ def _service_block(asset: Asset, topology: Topology, presets: RolePresets) -> di
 
 
 def generate_compose(manifest: Manifest, presets: RolePresets) -> dict[str, Any]:
-    """マニフェストのtopology層から docker-compose.yml 相当の辞書を生成する。"""
+    """マニフェストのtopology層(+instrumentation層があれば計装も)から
+    docker-compose.yml 相当の辞書を生成する。
+    """
     topology = manifest.topology
-    return {
-        "networks": _network_block(topology.segments),
-        "services": {
-            asset.name: _service_block(asset, topology, presets)
-            for asset in topology.assets
-        },
-    }
+    try:
+        return {
+            "networks": _network_block(topology.segments),
+            "services": {
+                asset.name: _service_block(
+                    asset, topology, presets, manifest.instrumentation
+                )
+                for asset in topology.assets
+            },
+        }
+    except MirroringGenerationError as exc:
+        raise ComposeGenerationError(str(exc)) from exc
 
 
 def dump_compose_yaml(compose: dict[str, Any]) -> str:

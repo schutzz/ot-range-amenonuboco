@@ -85,3 +85,20 @@ topology:
         - { segment: cc_lan }   # IP動的割当
       overrides:
         command: "while true; do curl -s -X POST http://elasticsearch:9200/_enrich/policy/detection_lookup_policy/_execute; sleep 60; done"
+
+    - name: tap_observer
+      # Phase2: mirror_linkへの単一接続の観測ノード。tcpdumpでミラーされた
+      # トラフィックを直接確認する(前身ot-ids-verumのzeek_tap相当、実際のZeek
+      # 導入はPhase3の構造化層のスコープ)。IPは動的割当。
+      role: observer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link }
+      overrides:
+        command: "apt-get update -qq && apt-get install -y -qq tcpdump >/dev/null 2>&1 && tcpdump -i eth0 -nn"
+
+instrumentation:
+  # Phase2決定事項#28: オプトアウト方式。exclude:[]なので、topology.segments
+  # の全セグメント(mirror_link自身を除く)が自動的に観測対象になる。
+  mirror_to: mirror_link
+  exclude: []
