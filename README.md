@@ -1,6 +1,6 @@
 # Amenonuboco — Cyber Range as a Code
 
-![status](https://img.shields.io/badge/status-Phase%204%20(Detection%20%26%20Attack)-brightgreen)
+![status](https://img.shields.io/badge/status-Phase%205%20(Reproduction%20Demo)-brightgreen)
 
 > **天沼矛（あめのぬぼこ）** — マニフェスト1枚から、OT/ICS向けサイバーレンジ（攻撃対象 + 計装 + 検知パイプライン）を動的にプロビジョニングするためのプラットフォーム。
 
@@ -38,7 +38,7 @@ ot-range-amenonuboco/
 
 マニフェスト1枚（[`manifests/power-grid-reference.yaml`](./manifests/power-grid-reference.yaml)、前身 `ot-ids-verum` の電力網ラボのトポロジを再現したリファレンススライス）から、下記2つを生成できます。
 
-1. `docker-compose.yml` — 実際に `docker compose up` で11コンテナが起動し、マルチホーム資産（ゲートウェイ）を経由したクロスセグメントルーティングが機能することを実機確認済みです。マニフェストに `instrumentation` 層（観測対象セグメントの宣言、既定で全セグメントが対象になるオプトアウト方式）を加えるだけで、ゲートウェイ資産が `tc` ベースのミラーリングを自動設定し、複数セグメントを跨ぐ通信が観測ノードへ実際に届くことも実機確認済みです（送出側・受信側双方のカーネルカウンタで検証）。さらに `structuring` 層を加えると、専用ロール（`structurer`）の資産が tshark ベースの構造化パイプラインを自動起動し、ミラーされたトラフィックを Elasticsearch へバルク投入します。実際にセグメントを跨ぐ HTTP トラフィックを捕捉し、`ot-logs-http-*` へ書き込まれ検索可能になることまで実機確認済みです。そして `detection`／`attack` 層を加えると、検知プラグイン（sidecar）を任意の資産へ載せ、Caldera エンジンを配線します。前身 `ot-ids-verum` の検知スクリプト（Signal 6）を**環境定義に一切手を入れずに**差し込み、実機で Elasticsearch へ接続するところまで確認済みです。
+1. `docker-compose.yml` — 実際に `docker compose up` で13コンテナが起動し、マルチホーム資産（ゲートウェイ）を経由したクロスセグメントルーティングが機能することを実機確認済みです。マニフェストに `instrumentation` 層（観測対象セグメントの宣言、既定で全セグメントが対象になるオプトアウト方式）を加えるだけで、ゲートウェイ資産が `tc` ベースのミラーリングを自動設定し、複数セグメントを跨ぐ通信が観測ノードへ実際に届くことも実機確認済みです（送出側・受信側双方のカーネルカウンタで検証）。さらに `structuring` 層を加えると、専用ロール（`structurer`）の資産が tshark ベースの構造化パイプラインを自動起動し、ミラーされたトラフィックを Elasticsearch へバルク投入します。実際にセグメントを跨ぐ HTTP/DNP3 トラフィックを捕捉し、`ot-logs-<protocol>-*` へ書き込まれ検索可能になることまで実機確認済みです。そして `detection`／`attack` 層を加えると、検知プラグイン（sidecar）を任意の資産へ載せ、Caldera エンジンを配線します。**前身 `ot-ids-verum` の検知シナリオ（Signal 1: ゾーン逸脱検知）を、環境定義に一切手を入れずに差し込み、攻撃 → 構造化 → 検知発火 → 正解ラベルとの一致まで、縦に1本通しきることを実機で確認しました**（不正セグメントからのDNP3送信 → tsharkによる構造化 → sidecarでのアラート発火 → 独立した評価ハーネスでの正解ラベル照合、一致率100%）。
 2. 防御側・統裁側向けのHTMLネットワーク図（外部ライブラリ非依存の自己完結ファイル、ズーム/パン・ノードホバーでの詳細表示に対応）：
 
 ![Amenonubocoが生成したネットワーク図の例](./docs/images/network-diagram-preview.png)
@@ -61,7 +61,7 @@ python cli.py diagram   ../manifests/power-grid-reference.yaml   # ネットワ�
 
 ## ステータス
 
-**Phase 4（検知・攻撃層の差し込み口）完了** — トポロジ層（Phase 1）・計装層（Phase 2）・構造化層（Phase 3）に加え、検知層（sidecar プラグインを任意の資産へ載せる差し込み口）と攻撃層（Caldera 統合の配線）が動作しています。前身 `ot-ids-verum` の検知スクリプトを環境定義に手を入れず1シナリオとして差し込めることを実機で確認しました。次は Phase 5（動的性・スケールの検証）に着手予定です。
+**Phase 5（完全再現デモ）完了** — トポロジ層〜検知・攻撃層の差し込み口（Phase 1〜4）に加え、前身 `ot-ids-verum` の検知シナリオ「Signal 1: ゾーン逸脱検知」を、**攻撃 → 構造化 → 検知発火 → 正解ラベル一致まで縦に1本通しきりました**。マニフェストの宣言だけで生成される部分と、ユーザーが持ち込む3本のシナリオスクリプト（検知ロジック・攻撃・評価）の境界を、実データで示せる状態です。次は Phase 6（重要インフラの器展開）に着手予定です。
 
 ## ライセンス
 

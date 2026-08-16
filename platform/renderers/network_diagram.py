@@ -99,6 +99,31 @@ def _asset_segment_names(asset: Asset) -> list[str]:
     return [net.segment for net in asset.networks]
 
 
+def _segment_box_heights(topology: Topology) -> dict[str, float]:
+    """各セグメント箱の高さを、そこに単一接続する資産の行数に応じて動的に
+    算出する(罠ログ#021)。固定値だと、資産が増えて行数が増えるたびに
+    最終行のラベルがバッジの位置にはみ出す不具合が繰り返し起きた(罠#015が
+    縦方向、罠#016が横方向、本件は「行数そのものの増加」に対応できていな
+    かった3件目)。資産数に追従させることで、この系統の不具合を構造的に
+    解消する。
+    """
+    counts: dict[str, int] = {}
+    for asset in topology.assets:
+        seg_names = _asset_segment_names(asset)
+        if len(seg_names) == 1:
+            counts[seg_names[0]] = counts.get(seg_names[0], 0) + 1
+
+    heights: dict[str, float] = {}
+    for seg in topology.segments:
+        n = counts.get(seg.name, 0)
+        rows = math.ceil(n / _ASSET_COLS) if n > 0 else 0
+        # ヘッダー(ラベル+CIDR、58px) + 資産の行(1行目はヘッダー直下、
+        # 2行目以降は_ASSET_ROW_GAPごと) + バッジとその余白(70px)。
+        content_height = 58 + max(rows - 1, 0) * _ASSET_ROW_GAP + 70
+        heights[seg.name] = max(_SEGMENT_BOX_H, content_height)
+    return heights
+
+
 def _coverage(manifest: Manifest) -> tuple[set[str], str | None]:
     """(観測対象セグメント名の集合, ミラー集約先セグメント名)を返す。
 
@@ -150,7 +175,10 @@ def _coverage_badge(seg_name: str, observed: set[str], mirror_to: str | None) ->
 
 
 def _mirror_flow_lines(
-    seg_pos: dict[str, tuple[float, float]], observed: set[str], mirror_to: str | None
+    seg_pos: dict[str, tuple[float, float]],
+    seg_heights: dict[str, float],
+    observed: set[str],
+    mirror_to: str | None,
 ) -> list[str]:
     """観測対象セグメント → ミラー集約先セグメント へのフロー線。
     箱の中心同士を結ぶと箱の下に隠れるため、両端を箱の外側へ寄せる。
@@ -158,18 +186,21 @@ def _mirror_flow_lines(
     if mirror_to is None or mirror_to not in seg_pos:
         return []
     mx, my = seg_pos[mirror_to]
+    m_half_h = seg_heights[mirror_to] / 2 + 9
     lines: list[str] = []
     for name in sorted(observed):
         if name not in seg_pos:
             continue
         sx, sy = seg_pos[name]
+        s_half_h = seg_heights[name] / 2 + 9
         dx, dy = mx - sx, my - sy
         dist = math.hypot(dx, dy) or 1.0
         ux, uy = dx / dist, dy / dist
-        # 箱の外側で始まり、外側で終わるよう寄せる(半幅145/半高95より少し外)。
-        # 内側に入り込むと、矢印の先端が箱の中の資産ノードと重なって読めなくなる。
-        x1, y1 = sx + ux * 152, sy + uy * 104
-        x2, y2 = mx - ux * 152, my - uy * 104
+        # 箱の外側で始まり、外側で終わるよう寄せる(半幅145+7/半高は各セグメント
+        # の実高さに応じて可変、罠ログ#021)。内側に入り込むと、矢印の先端が
+        # 箱の中の資産ノードと重なって読めなくなる。
+        x1, y1 = sx + ux * 152, sy + uy * s_half_h
+        x2, y2 = mx - ux * 152, my - uy * m_half_h
         lines.append(
             f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
             f'class="mirror-flow" marker-end="url(#mirror-arrow)">'
@@ -263,22 +294,24 @@ def _info_panel_html(manifest: Manifest, observed: set[str], mirror_to: str | No
 def render_network_diagram(manifest: Manifest) -> str:
     topology: Topology = manifest.topology
     seg_pos = _segment_positions(topology.segments)
+    seg_heights = _segment_box_heights(topology)
     observed, mirror_to = _coverage(manifest)
 
     svg_parts: list[str] = []
 
     # --- ミラーフロー線(セグメント箱より先に描き、箱の下に潜らせる) ---
-    svg_parts.extend(_mirror_flow_lines(seg_pos, observed, mirror_to))
+    svg_parts.extend(_mirror_flow_lines(seg_pos, seg_heights, observed, mirror_to))
 
     # --- セグメント箱 ---
     for seg in topology.segments:
         cx, cy = seg_pos[seg.name]
-        x, y = cx - _SEGMENT_BOX_W / 2, cy - _SEGMENT_BOX_H / 2
+        box_h = seg_heights[seg.name]
+        x, y = cx - _SEGMENT_BOX_W / 2, cy - box_h / 2
         fill = _SEGMENT_KIND_COLORS.get(seg.kind, "rgba(120,120,120,0.14)")
         border_color, border_w = _segment_border(seg.name, observed, mirror_to)
         badge = _coverage_badge(seg.name, observed, mirror_to)
         badge_el = (
-            f'<text x="{cx:.1f}" y="{y + _SEGMENT_BOX_H - 8:.1f}" class="seg-badge" '
+            f'<text x="{cx:.1f}" y="{y + box_h - 8:.1f}" class="seg-badge" '
             f'text-anchor="middle" fill="{border_color}">{_esc(badge)}</text>'
             if badge
             else ""
@@ -288,7 +321,7 @@ def render_network_diagram(manifest: Manifest) -> str:
             title += f"\n{badge}"
         svg_parts.append(
             f'<g class="segment">'
-            f'<rect x="{x:.1f}" y="{y:.1f}" width="{_SEGMENT_BOX_W}" height="{_SEGMENT_BOX_H}" '
+            f'<rect x="{x:.1f}" y="{y:.1f}" width="{_SEGMENT_BOX_W}" height="{box_h:.1f}" '
             f'rx="10" fill="{fill}" stroke="{border_color}" stroke-width="{border_w}">'
             f"<title>{_esc(title)}</title>"
             f"</rect>"
@@ -314,7 +347,7 @@ def render_network_diagram(manifest: Manifest) -> str:
 
     for seg_name, members in single_homed.items():
         cx, cy = seg_pos[seg_name]
-        top = cy - _SEGMENT_BOX_H / 2 + 58
+        top = cy - seg_heights[seg_name] / 2 + 58
         for row_start in range(0, len(members), _ASSET_COLS):
             row_members = members[row_start : row_start + _ASSET_COLS]
             row_index = row_start // _ASSET_COLS

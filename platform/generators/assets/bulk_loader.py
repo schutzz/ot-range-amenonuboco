@@ -94,13 +94,23 @@ def main() -> int:
             concrete_index = _resolve_concrete_index(args.index)
             buffer.append(json.dumps({"index": {"_index": concrete_index}}))
             pending_is_action = False
+            # ここではflush判定を行わない。アクション行だけを積んだ状態
+            # (対になるドキュメント行がまだ届いていない)でflushすると、
+            # 末尾がアクション行だけの不完全な_bulkボディを送ることになり、
+            # Elasticsearchが"no requests added"で拒否する(罠ログ#018)。
+            # HTTPのような高頻度トラフィックでは次のドキュメント行がすぐ
+            # 届くため気づきにくいが、DNP3のような疎なトラフィックで
+            # flush_interval(既定5秒)がアクション行の直後に経過すると
+            # 顕在化する。
         else:
             buffer.append(json.dumps(obj))
             doc_count += 1
             pending_is_action = True
-
-        if doc_count >= args.batch_size or (time.monotonic() - last_flush) >= args.flush_interval:
-            flush()
+            # flush判定はドキュメント行を積んで「完全な1組」になった
+            # 直後にのみ行う。これによりbufferは常にアクション/ドキュメント
+            # の完全な組だけを保持した状態でflushされる。
+            if doc_count >= args.batch_size or (time.monotonic() - last_flush) >= args.flush_interval:
+                flush()
 
     flush()
     return 0

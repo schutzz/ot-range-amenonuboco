@@ -36,14 +36,26 @@ topology:
 
     - name: cc_scada_master
       # Phase 1はトポロジ/ルーティング層のみの等価性検証が目的であり、前身の
-      # 実アプリ(scada_mtu_server.py)の再現はスコープ外(Phase 4の検知・攻撃層
-      # 差し込み口で扱う)。素のベースイメージ+待機コマンドで代替する。
+      # 実アプリ(scada_mtu_server.py)の再現はスコープ外だった。Phase5で
+      # Signal1(ゾーン逸脱)の実証対象として、20000番ポートでTCP接続を受ける
+      # だけの最小リスナーを追加する(overrides.commandはPhase1決定事項#17の
+      # 通りアプリ内容としてユーザーが自由に書ける領域であり、生成器が制限する
+      # 対象ではない)。python標準ライブラリのhttp.serverはHTTPとして解釈でき
+      # なくても実際のTCPペイロードはワイヤに乗るため、tsharkのポートベースの
+      # DNP3判定(既定でtcp/20000)には十分。前身のot_allowlist.csv上でも
+      # 10.0.10.10(このIPの前身版)がDNP3送信元として唯一許可されていた資産
+      # (Phase5決定事項#68)。
       role: ot-asset
       image: python:3.10-slim
       networks:
         - { segment: cc_lan, ip: 10.1.10.10 }
       overrides:
-        command: "tail -f /dev/null"
+        # バックグラウンド起動(&)を裸で書くと、呼び出し元が全コマンド列を
+        # &&で結合する仕組み(compose.py側)と衝突しかねない(罠ログ#010と
+        # 同型の危険)。Phase3決定事項#47と同じ「( cmd & wait )」の
+        # サブシェル形式にして、この資産のcommand全体が単一の安全な
+        # ブロッキングコマンドになるようにする。
+        command: "( python3 -m http.server 20000 & wait )"
 
     - name: sub_b_rtu_hmi
       # Alpine系イメージ(apk)。ルーティング生成のapk経路を検証する対象でもある
@@ -129,6 +141,29 @@ topology:
       networks:
         - { segment: cc_lan, ip: 10.1.10.80 }
 
+    - name: zone_detector
+      # Phase5: 検知プラグイン(Signal1ゾーン逸脱)を載せるホスト資産。
+      # killchain_detectorと同型(cc_lan単独接続、パケット観測に依存しない)。
+      role: detection-infra
+      image: python:3.11-slim
+      networks:
+        - { segment: cc_lan, ip: 10.1.10.81 }
+
+    - name: eval_harness
+      # Phase5: 評価ハーネス(正解ラベルの記録・突き合わせ)を実行する専用資産。
+      # 攻撃者ノード(sub_a_ied_02、sub_a_l2_lan接続)はcc_lan上の
+      # elasticsearchへ名前解決できず、そもそも攻撃者ノード自身が正解ラベルを
+      # 書き込む設計は前身のOOB自己申告(oob_redis/oob_webdis)と同じ構図に
+      # なってしまうと実装時に判明した(罠ログ#017)。演習を実行した側
+      # (オペレータ)が独立に記録できるよう、cc_lan接続の専用資産として分離
+      # する(Phase0決定事項#13で予告した「載せる口」の実体、Phase5決定事項#69)。
+      role: eval-harness
+      image: python:3.11-slim
+      networks:
+        - { segment: cc_lan, ip: 10.1.10.90 }
+      overrides:
+        command: "tail -f /dev/null"
+
     - name: caldera_server
       # Phase4: 攻撃エミュレーションエンジン(Caldera server)。攻撃層は
       # engine.caldera.hostでこの資産を名前参照する(決定事項#53の一元化)。
@@ -156,7 +191,8 @@ structuring:
   # 書き込む想定(Phase3決定事項#39・#40)。
   engine: tshark
   protocols:
-    - { name: http, output_index: ot-logs-http-* }
+    - { name: http,  output_index: ot-logs-http-* }
+    - { name: dnp3,  output_index: ot-logs-dnp3-* }   # Phase5: Signal1(ゾーン逸脱)の実証対象
 
 detection:
   # Phase4: 前身ot-ids-verumのSignal6(キルチェーン相関)を、環境定義に一切
@@ -171,8 +207,22 @@ detection:
       requires: [ requests ]        # 生のpip installは書かない(決定事項#56)
       config:                       # 環境変数として注入される(決定事項#57)
         ES_URL: http://elasticsearch:9200
+    - name: signal-1-zone-violation
+      # Phase5: 前身の判定ロジック(Vector VRL内のallowlistルックアップ)を
+      # sidecarへ書き直したもの(決定事項#68)。前身のot_allowlist.csvは
+      # 「許可された送信元IP1件のみ」の単純な許可リストであり、Phase5計画時に
+      # 想定していたセグメント間フロー方式(決定事項#64案A当初案)より単純
+      # だったため、実装時にALLOWED_DNP3_SOURCESという素直なIP許可リストへ
+      # 補正した(前身の実データへの忠実さを優先)。
+      type: sidecar
+      host: zone_detector
+      source: ../scenarios/legacy-power-grid-signals/zone_violation.py
+      requires: [ requests ]
+      config:
+        ES_URL: http://elasticsearch:9200
+        ALLOWED_DNP3_SOURCES: "10.1.10.10"   # cc_scada_masterのみ許可(前身のot_allowlist.csvと同じ資産)
   evaluation_harness:
-    enabled: false                  # Phase4では口のみ(決定事項#59)
+    enabled: true                   # Phase5で最小実装(決定事項#69)
 
 attack:
   # Phase4: Caldera統合の最低ライン(Phase0決定事項#3)。engine.caldera自体が
