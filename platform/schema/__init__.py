@@ -8,6 +8,7 @@ from .presets import (
     load_role_presets,
     resolve_effective_attributes,
 )
+from .structuring import ProtocolMapping, Structuring, StructuringException
 from .topology import (
     Asset,
     AssetNetwork,
@@ -31,12 +32,15 @@ __all__ = [
     "ManifestLoadError",
     "Metadata",
     "PresetLoadError",
+    "ProtocolMapping",
     "ResolvedAttributes",
     "RolePreset",
     "RolePresets",
     "Routing",
     "Segment",
     "SegmentKind",
+    "Structuring",
+    "StructuringException",
     "Topology",
     "load_manifest",
     "load_role_presets",

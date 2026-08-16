@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from schema import Asset, Instrumentation, Topology
 
+from .shell import resolve_interface_snippet
+
 
 class MirroringGenerationError(Exception):
     """ミラーリング設定生成時のエラー(ゲートウェイのIP未設定等)。"""
@@ -42,18 +44,6 @@ def _require_gateway_ip(gateway: Asset, segment_name: str) -> str:
     return ip
 
 
-def _resolve_interface_snippet(var_name: str, ip: str) -> str:
-    """IPアドレスからインターフェース名を動的に解決する1行(決定事項#29)。
-    Dockerの仮想インターフェース名(`eth3@if1462`形式)から実名だけを安全に
-    切り出す`awk -F'@'`パターンは、前身ot-ids-verumが罠#003で確立した対策
-    をそのまま踏襲している。
-    """
-    return (
-        f"{var_name}=$(ip -o addr show | grep '{ip}' | "
-        f"awk '{{print $2}}' | awk -F'@' '{{print $1}}')"
-    )
-
-
 def _idempotent_mirror_block(segment_if_var: str, mirror_if_var: str) -> list[str]:
     """1セグメント分の冪等化済みtcミラーリング設定(決定事項#30)。
     `tc filter del`を`add`の直前に必ず置く4行1セットで、片方だけ冪等化する
@@ -77,12 +67,12 @@ def generate_mirroring_commands(
     gateway = _require_gateway(topology)
 
     mirror_ip = _require_gateway_ip(gateway, instrumentation.mirror_to)
-    commands: list[str] = [_resolve_interface_snippet("MIRROR_IF", mirror_ip)]
+    commands: list[str] = [resolve_interface_snippet("MIRROR_IF", mirror_ip)]
 
     for segment in instrumentation.observed_segments(topology):
         seg_ip = _require_gateway_ip(gateway, segment.name)
         var_name = f"{segment.name.upper()}_IF"
-        commands.append(_resolve_interface_snippet(var_name, seg_ip))
+        commands.append(resolve_interface_snippet(var_name, seg_ip))
         commands.extend(_idempotent_mirror_block(var_name, "MIRROR_IF"))
 
     return commands

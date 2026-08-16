@@ -21,11 +21,18 @@ from schema import (
     Manifest,
     RolePresets,
     Segment,
+    Structuring,
     Topology,
     resolve_effective_attributes,
 )
 
 from .mirroring import MirroringGenerationError, generate_mirroring_commands
+from .structuring import (
+    BULK_LOADER_CONTAINER_PATH,
+    BULK_LOADER_HOST_PATH,
+    StructuringGenerationError,
+    generate_structuring_commands,
+)
 
 
 class ComposeGenerationError(Exception):
@@ -89,30 +96,39 @@ _INSTALL_IPROUTE2 = (
 
 
 def _assemble_command(
-    mirroring_cmds: list[str], routing_cmds: list[str], app_command: str | None
+    mirroring_cmds: list[str],
+    routing_cmds: list[str],
+    structuring_cmds: list[str],
+    app_command: str | None,
 ) -> str | None:
-    """ミラーリング設定 + ルーティング + アプリ起動 を1本のshellコマンドに合成する。
+    """ミラーリング設定 + ルーティング + アプリ起動 + 構造化パイプライン を
+    1本のshellコマンドに合成する。
 
-    実行順序はミラーリング→ルーティング→アプリ起動に固定する(Phase2決定事項#31、
-    観測基盤を経路設定より先に整えておく)。
+    実行順序はミラーリング→ルーティング→アプリ起動→構造化パイプラインに
+    固定する(Phase2決定事項#31を拡張)。構造化パイプラインを最後に置くのは、
+    生成コマンドの末尾が`wait`（バックグラウンドtsharkプロセスの終了を無期限
+    に待つ）で終わるため、これより後ろに置いたコマンドには到達しなくなる
+    という性質上の制約による(Phase3決定事項#45)。
 
-    **overrides.command が明示されている資産にのみ適用する**(呼び出し元
-    _service_block が routing_cmds/mirroring_cmds の算出自体をこの条件で制御
-    する)。app_command が無ければNoneを返し、イメージ既定のENTRYPOINT/CMDを
+    **overrides.command または構造化パイプラインの生成対象である資産にのみ
+    適用する**(呼び出し元 _service_block が各cmds の算出自体をこの条件で
+    制御する)。どちらも無ければNoneを返し、イメージ既定のENTRYPOINT/CMDを
     一切上書きしない(elasticsearch/vector等、ベースイメージ自身の起動スクリプト
     に依存するコンテナを壊さないため。Phase1決定事項#22)。
 
     シェルは`sh`を使う(bashが無いAlpine系イメージでも動くように)。
     """
-    if not app_command:
+    if not app_command and not structuring_cmds:
         return None
 
     parts: list[str] = []
-    if mirroring_cmds or routing_cmds:
+    if mirroring_cmds or routing_cmds or structuring_cmds:
         parts.append(_INSTALL_IPROUTE2)
         parts.extend(mirroring_cmds)
         parts.extend(routing_cmds)
-    parts.append(app_command)
+    if app_command:
+        parts.append(app_command)
+    parts.extend(structuring_cmds)
 
     joined = " && ".join(parts)
     # Docker Compose自体が command 文字列中の $VAR / $(...) を「Composeの変数
@@ -169,11 +185,32 @@ def _mirroring_commands_for_asset(
     return generate_mirroring_commands(topology, instrumentation)
 
 
+def _structuring_commands_for_asset(
+    asset: Asset,
+    instrumentation: Instrumentation | None,
+    structuring: Structuring | None,
+    resolved_cap_add: list[str],
+) -> list[str]:
+    """構造化パイプラインは、①instrumentation・structuring両層が宣言されて
+    おり、②この資産が`structurer`ロールであり、③実際にNET_ADMINを保持して
+    いる場合にのみ算出する(ミラーリング・ルーティングと同じ考え方、
+    Phase3決定事項#45)。
+    """
+    if instrumentation is None or structuring is None:
+        return []
+    if asset.role != "structurer":
+        return []
+    if "NET_ADMIN" not in resolved_cap_add:
+        return []
+    return generate_structuring_commands(asset, instrumentation, structuring)
+
+
 def _service_block(
     asset: Asset,
     topology: Topology,
     presets: RolePresets,
     instrumentation: Instrumentation | None,
+    structuring: Structuring | None,
 ) -> dict[str, Any]:
     resolved = resolve_effective_attributes(asset, presets)
 
@@ -202,33 +239,54 @@ def _service_block(
     if resolved.ports:
         service["ports"] = resolved.ports
 
+    if resolved.environment:
+        service["environment"] = resolved.environment
+
     net_block: dict[str, Any] = {}
     for net in asset.networks:
         net_block[net.segment] = {"ipv4_address": net.ip} if net.ip else {}
     service["networks"] = net_block
 
-    # ルーティングは、①overrides.commandが明示されており(決定事項#22)、
-    # かつ②実際にNET_ADMINを保持している資産にのみ算出する。NET_ADMINが
-    # 無いと`ip route add`自体が"Operation not permitted"で失敗し、&&で
-    # 繋いだ後続のアプリ起動コマンドごと道連れにしてしまう(罠ログ#005)。
-    needs_routing = bool(resolved.command) and "NET_ADMIN" in resolved.cap_add
+    # 構造化パイプラインの算出は、overrides.commandの有無より先に行う。
+    # structurer資産は通常overrides.commandを持たない(tshark実行が起動コマンド
+    # の全てを担う想定のため)、構造化コマンドの有無自体が「この資産が自分の
+    # 起動コマンドを持つかどうか」の判定に加わる(Phase3決定事項#45)。
+    structuring_cmds = _structuring_commands_for_asset(
+        asset, instrumentation, structuring, resolved.cap_add
+    )
+    has_own_startup = bool(resolved.command) or bool(structuring_cmds)
+
+    # ルーティング・ミラーリングは、①(overrides.commandまたは構造化パイプ
+    # ライン生成対象)であり、かつ②実際にNET_ADMINを保持している資産にのみ
+    # 算出する。NET_ADMINが無いと`ip route add`自体が"Operation not
+    # permitted"で失敗し、&&で繋いだ後続のコマンドごと道連れにしてしまう
+    # (罠ログ#005)。
+    needs_routing = has_own_startup and "NET_ADMIN" in resolved.cap_add
     routing_cmds = _routing_commands(topology, asset) if needs_routing else []
     mirroring_cmds = (
         _mirroring_commands_for_asset(asset, topology, instrumentation, resolved.cap_add)
-        if resolved.command
+        if has_own_startup
         else []
     )
-    command = _assemble_command(mirroring_cmds, routing_cmds, resolved.command)
+    command = _assemble_command(mirroring_cmds, routing_cmds, structuring_cmds, resolved.command)
     if command:
         service["command"] = command
+
+    if structuring_cmds:
+        # バルクローダー本体を読み取り専用でマウントする(決定事項#40)。
+        # ホスト側の絶対パスを使う(生成先のdocker-compose.ymlの場所に依存
+        # しない、Phase3決定事項#46)。
+        service.setdefault("volumes", []).append(
+            f"{BULK_LOADER_HOST_PATH.as_posix()}:{BULK_LOADER_CONTAINER_PATH}:ro"
+        )
 
     service["restart"] = "unless-stopped"
     return service
 
 
 def generate_compose(manifest: Manifest, presets: RolePresets) -> dict[str, Any]:
-    """マニフェストのtopology層(+instrumentation層があれば計装も)から
-    docker-compose.yml 相当の辞書を生成する。
+    """マニフェストのtopology層(+instrumentation/structuring層があれば
+    計装・構造化も)から docker-compose.yml 相当の辞書を生成する。
     """
     topology = manifest.topology
     try:
@@ -236,12 +294,16 @@ def generate_compose(manifest: Manifest, presets: RolePresets) -> dict[str, Any]
             "networks": _network_block(topology.segments),
             "services": {
                 asset.name: _service_block(
-                    asset, topology, presets, manifest.instrumentation
+                    asset,
+                    topology,
+                    presets,
+                    manifest.instrumentation,
+                    manifest.structuring,
                 )
                 for asset in topology.assets
             },
         }
-    except MirroringGenerationError as exc:
+    except (MirroringGenerationError, StructuringGenerationError) as exc:
         raise ComposeGenerationError(str(exc)) from exc
 
 

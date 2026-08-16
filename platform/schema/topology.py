@@ -29,6 +29,7 @@ AssetRole = Literal[
     "l3-router",
     "detection-infra",
     "observer",
+    "structurer",  # Phase3決定事項#41: 構造化パイプライン(tshark+バルクローダー)実行ノード
     "eval-harness",
     "attacker-external",
     "attacker-internal",
@@ -82,6 +83,13 @@ class AssetOverrides(BaseModel):
     command: Optional[str] = None
     cap_add: Optional[list[str]] = None
     sysctls: Optional[list[str]] = None
+    # コンテナの環境変数(`KEY=VALUE`形式、Docker Composeの`environment`と同じ記法)。
+    # ports/commandと同じくロールプリセット側に概念が無いため、常にoverridesの値
+    # をそのまま使う(加算/上書きの曖昧さが生じない)。Phase3実機検証で、
+    # elasticsearchが既定でTLS必須(xpack.security.enabled)で起動し、
+    # es_enrich_refresher/structurerいずれのプレーンHTTPも到達できないことが
+    # 判明して追加した(Phase3決定事項#48、罠ログ#011)。
+    environment: list[str] = Field(default_factory=list)
 
 
 class Asset(BaseModel):
@@ -178,8 +186,9 @@ class Topology(BaseModel):
 
 
 class Manifest(BaseModel):
-    """マニフェスト全体。structuring/detection/attack はまだモデル化するまで、
-    未検証の生データ(dict)として保持するのみ。instrumentationはPhase2でモデル化した。
+    """マニフェスト全体。detection/attack はまだモデル化するまで、未検証の
+    生データ(dict)として保持するのみ。instrumentation(Phase2)・structuring
+    (Phase3)はモデル化済み。
     """
 
     model_config = {"populate_by_name": True}
@@ -189,9 +198,9 @@ class Manifest(BaseModel):
     metadata: Metadata
     topology: Topology
     instrumentation: Optional["Instrumentation"] = None
+    structuring: Optional["Structuring"] = None
 
-    # Phase 3以降でモデル化するまでの暫定(未検証の生データ)
-    structuring: Optional[dict] = None
+    # Phase 4以降でモデル化するまでの暫定(未検証の生データ)
     detection: Optional[dict] = None
     attack: Optional[dict] = None
 
@@ -206,6 +215,9 @@ class Manifest(BaseModel):
 
 # 循環import回避のための遅延解決(instrumentation.py が topology.py の Segment/Topology
 # を参照するため、Manifestの型ヒントは文字列参照にしておき、ここで解決する)。
+# structuring.py はtopology.pyに依存しないため循環の心配はないが、統一的に
+# ここでまとめて解決する。
 from .instrumentation import Instrumentation  # noqa: E402
+from .structuring import Structuring  # noqa: E402
 
 Manifest.model_rebuild()

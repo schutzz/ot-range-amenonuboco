@@ -41,6 +41,7 @@ class ResolvedAttributes(BaseModel):
     sysctls: list[str] = Field(default_factory=list)
     ports: list[str] = Field(default_factory=list)
     command: str | None = None
+    environment: list[str] = Field(default_factory=list)
 
 
 def load_role_presets(path: str | Path = _DEFAULT_PRESETS_PATH) -> RolePresets:
@@ -100,4 +101,5 @@ def resolve_effective_attributes(asset: Asset, presets: RolePresets) -> Resolved
         sysctls=sysctls,
         ports=list(asset.overrides.ports),
         command=command,
+        environment=list(asset.overrides.environment),
     )

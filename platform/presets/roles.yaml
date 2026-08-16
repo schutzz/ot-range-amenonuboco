@@ -40,8 +40,18 @@ roles:
     sysctls: []
 
   observer:
-    # 観測ノード(tshark/Zeek/Suricata)。パケットキャプチャに必要な権限を持つ。
+    # 観測ノード(生パケットを人間が目視確認する用途、tcpdump等)。
+    # パケットキャプチャに必要な権限を持つ。
     # 前身(ot-ids-verum)での該当例: zeek_tap, suricata_ids
+    cap_add: [NET_ADMIN, NET_RAW]
+    sysctls: []
+
+  structurer:
+    # 構造化パイプライン(tshark+バルクローダー)実行ノード(Phase3決定事項#41)。
+    # observerと同じくパケットキャプチャ権限が要るが、Elasticsearchへの書き込み
+    # を担う点で責務が異なるため別ロールとして分離した。mirror_to+書き込み先
+    # セグメントへのマルチホーム接続を前提とする(Phase2決定事項#19の
+    # ip_forward=0ガードの対象になる)。
     cap_add: [NET_ADMIN, NET_RAW]
     sysctls: []
 

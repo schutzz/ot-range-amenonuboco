@@ -150,6 +150,20 @@ topology:
 
 > **設計意図**：`cap_add: [NET_ADMIN, NET_RAW]` のような属性を全資産に書くと冗長で誤りの温床になります。「観測ノードは NET_ADMIN を持つ」といった規則性はロールに畳み込み、マニフェストは差分だけを表現します。
 
+`environment`（コンテナ環境変数、`KEY=VALUE` 形式）も同じ `overrides` に置きます。`ports`/`command` と同様にロールプリセット側には概念を持たせず、指定した値がそのまま使われます。
+
+```yaml
+    - name: elasticsearch
+      role: detection-infra
+      image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+      networks:
+        - { segment: cc_lan, ip: 10.1.10.40 }
+      overrides:
+        environment:
+          - "discovery.type=single-node"
+          - "xpack.security.enabled=false"     # 未設定だと既定でTLS必須起動になる(Phase3決定事項#48)
+```
+
 ### 2.5 初期化処理をマニフェストに書かないこと
 
 前身 `ot-ids-verum` では各ノードの起動コマンドに「`apt-get install ...` ＋ `ip route add ...` ＋ アプリ起動」が生のシェル文字列で埋め込まれていました。**Amenonuboco ではこれらをマニフェストに持ち込みません**。
@@ -215,7 +229,7 @@ structuring:
 |---|---|---|
 | `engine` | ✅ | 既定の構造化エンジン。通常 `tshark` |
 | `protocols[].name` | ✅ | 構造化するプロトコル |
-| `protocols[].output_index` | ✅ | 出力先の Elasticsearch index。命名は `ot-logs-<protocol>-*` に統一 |
+| `protocols[].output_index` | ✅ | 出力先の Elasticsearch index の**検索パターン**（Kibana/Grafana の index pattern 相当）。命名は `ot-logs-<protocol>-*` に統一。実際の書き込み先は、末尾の `*` をUTC日付（`%Y.%m.%d`）に置き換えた具体的な日次index（例: `ot-logs-http-2026.08.16`）で、プロビジョナ側が自動導出する（Phase3決定事項#49） |
 | `exceptions[]` | ✕ | tshark では扱えない/不都合なプロトコルを、別エンジン（Spicy/Zeek 独立 sidecar）で処理する例外指定 |
 
 > **tshark を既定にする理由**：Wireshark の広範な dissector ライブラリを、新プロトコル対応のスケールの源泉にするためです。プロトコルごとに自作パーサーを書くのは実装・デバッグコストが高く、「マニフェストで宣言したら新プロトコルに対応」という目標に向きません。

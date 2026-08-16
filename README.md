@@ -1,6 +1,6 @@
 # Amenonuboco — Cyber Range as a Code
 
-![status](https://img.shields.io/badge/status-Phase%202%20(Instrumentation)-brightgreen)
+![status](https://img.shields.io/badge/status-Phase%203%20(Structuring)-brightgreen)
 
 > **天沼矛（あめのぬぼこ）** — マニフェスト1枚から、OT/ICS向けサイバーレンジ（攻撃対象 + 計装 + 検知パイプライン）を動的にプロビジョニングするためのプラットフォーム。
 
@@ -38,7 +38,7 @@ ot-range-amenonuboco/
 
 マニフェスト1枚（[`manifests/power-grid-reference.yaml`](./manifests/power-grid-reference.yaml)、前身 `ot-ids-verum` の電力網ラボのトポロジを再現したリファレンススライス）から、下記2つを生成できます。
 
-1. `docker-compose.yml` — 実際に `docker compose up` で8コンテナが起動し、マルチホーム資産（ゲートウェイ）を経由したクロスセグメントルーティングが機能することを実機確認済みです。マニフェストに `instrumentation` 層（観測対象セグメントの宣言、既定で全セグメントが対象になるオプトアウト方式）を加えるだけで、ゲートウェイ資産が `tc` ベースのミラーリングを自動設定し、複数セグメントを跨ぐ通信が観測ノードへ実際に届くことも実機確認済みです（送出側・受信側双方のカーネルカウンタで検証）。
+1. `docker-compose.yml` — 実際に `docker compose up` で9コンテナが起動し、マルチホーム資産（ゲートウェイ）を経由したクロスセグメントルーティングが機能することを実機確認済みです。マニフェストに `instrumentation` 層（観測対象セグメントの宣言、既定で全セグメントが対象になるオプトアウト方式）を加えるだけで、ゲートウェイ資産が `tc` ベースのミラーリングを自動設定し、複数セグメントを跨ぐ通信が観測ノードへ実際に届くことも実機確認済みです（送出側・受信側双方のカーネルカウンタで検証）。さらに `structuring` 層を加えると、専用ロール（`structurer`）の資産が tshark ベースの構造化パイプラインを自動起動し、ミラーされたトラフィックを Elasticsearch へバルク投入します。実際にセグメントを跨ぐ HTTP トラフィックを捕捉し、`ot-logs-http-*` へ書き込まれ検索可能になることまで実機確認済みです。
 2. 防御側・統裁側向けのHTMLネットワーク図（外部ライブラリ非依存の自己完結ファイル、ズーム/パン・ノードホバーでの詳細表示に対応）：
 
 ![Amenonubocoが生成したネットワーク図の例](./docs/images/network-diagram-preview.png)
@@ -55,7 +55,7 @@ python cli.py diagram   ../manifests/power-grid-reference.yaml   # ネットワ�
 
 ## ステータス
 
-**Phase 2（計装層の自動生成）完了** — トポロジ層（Phase 1：セグメント・資産・ルーティング）に加え、計装層（Phase 2：ミラーリング設定の自動生成）が動作しています。次はPhase 3（構造化層、tsharkの配線）に着手予定です。
+**Phase 3（構造化層の自動生成）完了** — トポロジ層（Phase 1）・計装層（Phase 2：ミラーリング設定の自動生成）に加え、構造化層（Phase 3：tsharkベースの構造化パイプライン＋軽量バルクローダーの自動生成）が動作しています。次はPhase 4（検知・攻撃層の差し込み口）に着手予定です。
 
 ## ライセンス
 

@@ -72,10 +72,20 @@ topology:
         - { segment: cc_lan, ip: 10.1.10.35 }
 
     - name: elasticsearch
+      # xpack.security.enabled=false・discovery.type=single-nodeが無いと、
+      # ES8系は既定でTLS必須(HTTPSのみ)起動になり、es_enrich_refresher/
+      # log_structurerいずれのプレーンHTTPリクエストも到達できない
+      # (Phase3決定事項#48、罠ログ#011。前身ot-ids-verumのdocker-compose.yml
+      # が最初からこの3変数を設定していた設計をそのまま踏襲する)。
       role: detection-infra
       image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
       networks:
         - { segment: cc_lan, ip: 10.1.10.40 }
+      overrides:
+        environment:
+          - "discovery.type=single-node"
+          - "xpack.security.enabled=false"
+          - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
 
     - name: es_enrich_refresher
       # Alpine系(busybox)イメージ。ports/entrypointを持たない検知sidecarの例。
@@ -88,8 +98,7 @@ topology:
 
     - name: tap_observer
       # Phase2: mirror_linkへの単一接続の観測ノード。tcpdumpでミラーされた
-      # トラフィックを直接確認する(前身ot-ids-verumのzeek_tap相当、実際のZeek
-      # 導入はPhase3の構造化層のスコープ)。IPは動的割当。
+      # トラフィックを直接確認する(前身ot-ids-verumのzeek_tap相当)。IPは動的割当。
       role: observer
       image: debian:bullseye-slim
       networks:
@@ -97,8 +106,29 @@ topology:
       overrides:
         command: "apt-get update -qq && apt-get install -y -qq tcpdump >/dev/null 2>&1 && tcpdump -i eth0 -nn"
 
+    - name: log_structurer
+      # Phase3: 構造化パイプライン(tshark+バルクローダー)実行ノード。
+      # observerとは責務分離(Phase3決定事項#41)。mirror_link(観測)+
+      # cc_lan(Elasticsearchへの書き込み)へのマルチホーム接続を持つ。
+      # tsharkのapt-getインストールが非対話モードを要するため、Debian系
+      # イメージのみを対象とする(Phase3決定事項#44の既知の制約)。
+      role: structurer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link, ip: 10.1.99.60 }
+        - { segment: cc_lan,      ip: 10.1.10.60 }
+
 instrumentation:
   # Phase2決定事項#28: オプトアウト方式。exclude:[]なので、topology.segments
   # の全セグメント(mirror_link自身を除く)が自動的に観測対象になる。
   mirror_to: mirror_link
   exclude: []
+
+structuring:
+  # Phase3: es_enrich_refresherが常時cc_lan内で生成しているHTTP POSTトラフィック
+  # (elasticsearchへの定期curl)を実証対象に使う。cc_lanは観測対象セグメント
+  # なのでmirror_linkへミラーされ、log_structurerが捕捉してot-logs-http-*へ
+  # 書き込む想定(Phase3決定事項#39・#40)。
+  engine: tshark
+  protocols:
+    - { name: http, output_index: ot-logs-http-* }
