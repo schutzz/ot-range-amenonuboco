@@ -47,11 +47,10 @@ structuring:       # ③ 構造化（tshark既定）
 
 detection:         # ④ 検知ロジックの差し込み口
   plugins: [...]
-  evaluation_harness: {...}
 
-attack:            # ⑤ 攻撃の実行環境
-  nodes: [...]
+attack:            # ⑤ 攻撃の実行環境（攻撃者ノードは topology.assets 側に置く）
   engine: {...}
+  agents: [...]
 ```
 
 ---
@@ -284,8 +283,6 @@ detection:
       requires: [ requests ]        # プラグインが必要とする Python パッケージ
       config:                       # プラグインへ環境変数として注入される
         ES_URL: http://elasticsearch:9200
-  evaluation_harness:
-    enabled: false
 ```
 
 | フィールド | 必須 | 説明 |
@@ -296,7 +293,6 @@ detection:
 | `plugins[].source` | ✅ | ロジック本体のパス（**マニフェスト外の資産**を指す。相対パスはマニフェスト自身の位置が基点） |
 | `plugins[].requires` | ✕ | プラグインが必要とする Python パッケージ。プロビジョナが導入コマンドへ合成します（生の `pip install` は書きません） |
 | `plugins[].config` | ✕ | プラグインへ**環境変数として注入**される設定。接続先などをプラグイン内にハードコードさせないための仕組みです |
-| `evaluation_harness.enabled` | ✕ | 正解ラベル源を載せるか（既定 `false`） |
 
 > **なぜ `host` で資産を指すのか**：コンテナ（資産）を宣言する場所は `topology.assets` の1箇所に統一しています。検知プラグインはコンテナを新たに作らず、既にトポロジに居る資産に「載る」だけです。「そこにどう繋がって存在するか」はトポロジ層が、「そこで何を実行するか」は検知層が担う、という責務の分け方です。
 
@@ -306,7 +302,9 @@ detection:
 
 ### 評価ハーネス（正解ラベル源）について
 
-前身 `ot-ids-verum` の `oob_redis`/`oob_webdis`（攻撃の正解ラベルをOut-of-Bandで供給する評価専用の仕組み）は、**そのままは持ち込みません**。旧実装は `io.popen` によるシェル呼び出しに依存しており、ポータビリティとセキュリティの両面で作り直しが必要なためです。マニフェストでは「評価ハーネスを載せる口」として抽象化し、実体は `eval-harness` ロールの専用資産（`topology.assets` へ通常の資産として宣言）に置きます。
+前身 `ot-ids-verum` の `oob_redis`/`oob_webdis`（攻撃の正解ラベルをOut-of-Bandで供給する評価専用の仕組み）は、**そのままは持ち込みません**。旧実装は `io.popen` によるシェル呼び出しに依存しており、ポータビリティとセキュリティの両面で作り直しが必要なためです。
+
+評価ハーネスに `detection` 配下の専用フィールドはありません。**`eval-harness` ロールの資産を `topology.assets` へ通常どおり宣言し、そこへ正解ラベルの記録・突き合わせを行うスクリプトを載せる**、という検知プラグインと同じ「載せる口」の形で表現します（コンテナを宣言する場所を1箇所に統一する方針。§7の攻撃者ノードと同じ考え方です）。
 
 > **正解ラベルは、攻撃者ノード自身に記録させないこと**：正解ラベル（「いつ・どこから・何を撃ったか」）を、攻撃者役の資産自身にElasticsearch等へ書き込ませる設計は避けてください。侵害された可能性のある側が自分の行動を自己申告する構図になり、前身が明示的に排除した「OOB自己申告」と同じ問題を抱えます。正解ラベルの記録は、`eval-harness` ロールの専用資産——演習を実行する側（オペレータ）に属する、攻撃者とも検知対象とも独立したホスト——から行ってください。
 
@@ -462,8 +460,6 @@ detection:
       source: ../scenarios/legacy-power-grid-signals/killchain_eql_poller.py
       requires: [ requests ]
       config: { ES_URL: http://elasticsearch:9200 }
-  evaluation_harness:
-    enabled: false
 
 attack:
   # 攻撃者ノード(sub_a_ied_02)・Caldera server(caldera_server)は

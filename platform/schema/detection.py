@@ -47,20 +47,18 @@ class DetectionPlugin(BaseModel):
     config: dict[str, str] = Field(default_factory=dict)
 
 
-class EvaluationHarness(BaseModel):
-    """正解ラベル源(評価ハーネス)の差し込み口。Phase4では口の定義のみで実体は
-    未実装(決定事項#59)。正解ラベルの供給方式の妥当性は、実際に検知結果と
-    突き合わせる段階でしか判断できないため、既定を無効にして先送りする。
-    前身`ot-ids-verum`の`oob_redis`/`oob_webdis`(io.popen+curl方式)は、
-    Phase0決定事項#13の通りそのままは持ち込まない。
-    """
-
-    enabled: bool = False
-
-
 class Detection(BaseModel):
+    # 評価ハーネス(正解ラベル源)は、専用フィールドではなく eval-harness ロールの
+    # 通常資産 + シナリオスクリプトで表現する(決定事項#77)。当初 Phase4で
+    # evaluation_harness.enabled という差し込み口フィールドを置いたが(決定事項
+    # #59)、Phase5で実際に評価ハーネスを実装した際、eval-harnessロールの資産を
+    # topology.assets に置き record_ground_truth.py/evaluate_signal1.py を載せる
+    # 方式(検知プラグインと同型の「載せる口」)で実現でき、専用フィールドは
+    # 二重表現になっていた(Phase4でattack.nodesを廃した理由=決定事項#53と同型)。
+    # かつ enabled フラグは生成器から一切参照されない死んだフラグだったため
+    # 削除した。将来プラットフォームが評価配線の自動化を提供する場合は、その
+    # 時点で改めて設計する(YAGNI)。
     plugins: list[DetectionPlugin] = Field(default_factory=list)
-    evaluation_harness: EvaluationHarness = Field(default_factory=EvaluationHarness)
 
     @model_validator(mode="after")
     def _validate_no_duplicate_names(self) -> "Detection":

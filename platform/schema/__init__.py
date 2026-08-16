@@ -1,5 +1,5 @@
 from .attack import Attack, AttackEngine, CalderaAgent, CalderaEngine
-from .detection import Detection, DetectionPlugin, EvaluationHarness
+from .detection import Detection, DetectionPlugin
 from .instrumentation import Instrumentation
 from .loader import ManifestLoadError, load_manifest
 from .presets import (
@@ -35,7 +35,6 @@ __all__ = [
     "CalderaEngine",
     "Detection",
     "DetectionPlugin",
-    "EvaluationHarness",
     "Instrumentation",
     "Manifest",
     "ManifestLoadError",

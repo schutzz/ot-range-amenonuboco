@@ -221,8 +221,10 @@ detection:
       config:
         ES_URL: http://elasticsearch:9200
         ALLOWED_DNP3_SOURCES: "10.1.10.10"   # cc_scada_masterのみ許可(前身のot_allowlist.csvと同じ資産)
-  evaluation_harness:
-    enabled: true                   # Phase5で最小実装(決定事項#69)
+  # 評価ハーネスは detection の専用フィールドではなく、eval-harnessロールの
+  # 資産(topology.assets の eval_harness)として表現する(決定事項#77)。
+  # 正解ラベルの記録・突き合わせは、その資産へ載せたシナリオスクリプト
+  # (record_ground_truth.py/evaluate_signal1.py)がオペレータ操作で担う。
 
 attack:
   # Phase4: Caldera統合の最低ライン(Phase0決定事項#3)。engine.caldera自体が

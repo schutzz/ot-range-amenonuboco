@@ -56,8 +56,10 @@ roles:
     sysctls: []
 
   eval-harness:
-    # 正解ラベル源(評価専用、Phase1では detection.evaluation_harness 未実装のため
-    # 評価対象外)。前身(ot-ids-verum)での該当例: oob_redis, oob_webdis
+    # 正解ラベル源・検知結果との突き合わせを担う評価ノード。Phase5で
+    # eval_harness資産として実使用(決定事項#77、record_ground_truth.py/
+    # evaluate_signal1.pyを載せる)。前身(ot-ids-verum)での該当例:
+    # oob_redis, oob_webdis(ただし前身のio.popen+curl方式は持ち込まず作り直し)。
     cap_add: []
     sysctls: []
 

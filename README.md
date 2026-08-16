@@ -1,6 +1,6 @@
 # Amenonuboco — Cyber Range as a Code
 
-![status](https://img.shields.io/badge/status-Phase%205%20(Reproduction%20Demo)-brightgreen)
+![status](https://img.shields.io/badge/status-Phase%205.5%20(Hardening)-brightgreen)
 
 > **天沼矛（あめのぬぼこ）** — マニフェスト1枚から、OT/ICS向けサイバーレンジ（攻撃対象 + 計装 + 検知パイプライン）を動的にプロビジョニングするためのプラットフォーム。
 
@@ -29,9 +29,12 @@ Infrastructure as Code がインフラ構成をコードで宣言してべき等
 
 ```
 ot-range-amenonuboco/
-├── manifests/    サイバーレンジ定義マニフェスト（宣言的な入力）
-├── platform/     マニフェストから環境を生成するプロビジョナ本体
-└── docs/         公開ドキュメント
+├── manifests/       サイバーレンジ定義マニフェスト（宣言的な入力）
+├── platform/        マニフェストから環境を生成するプロビジョナ本体
+├── scenarios/       検知ロジック・攻撃・評価のシナリオ資産（マニフェスト外）
+├── attack-assets/   Caldera の Ability/Adversary（マニフェスト外）
+├── tests/           スキーマ・生成物・シナリオ資産のユニットテスト
+└── docs/            公開ドキュメント
 ```
 
 ## 現在のテスト品
@@ -61,7 +64,14 @@ python cli.py diagram   ../manifests/power-grid-reference.yaml   # ネットワ�
 
 ## ステータス
 
-**Phase 5（完全再現デモ）完了** — トポロジ層〜検知・攻撃層の差し込み口（Phase 1〜4）に加え、前身 `ot-ids-verum` の検知シナリオ「Signal 1: ゾーン逸脱検知」を、**攻撃 → 構造化 → 検知発火 → 正解ラベル一致まで縦に1本通しきりました**。マニフェストの宣言だけで生成される部分と、ユーザーが持ち込む3本のシナリオスクリプト（検知ロジック・攻撃・評価）の境界を、実データで示せる状態です。次は Phase 6（重要インフラの器展開）に着手予定です。
+**Phase 5（完全再現デモ）＋ 地盤固め完了** — トポロジ層〜検知・攻撃層の差し込み口（Phase 1〜4）に加え、前身 `ot-ids-verum` の検知シナリオ「Signal 1: ゾーン逸脱検知」を、**攻撃 → 構造化 → 検知発火 → 正解ラベル一致まで縦に1本通しきりました**。マニフェストの宣言だけで生成される部分と、ユーザーが持ち込む3本のシナリオスクリプト（検知ロジック・攻撃・評価）の境界を、実データで示せる状態です。あわせて、スキーマ・生成物・シナリオ資産をカバーする pytest スイート（35テスト）と GitHub Actions CI を整備しました。次は Phase 6（可視化層 ── Grafana 等ダッシュボードの配線）に着手予定です。
+
+### 開発
+
+```bash
+pip install -r requirements-dev.txt
+pytest          # スキーマ検証・生成物・記法ガイド整合・シナリオ資産のテスト
+```
 
 ## ライセンス
 

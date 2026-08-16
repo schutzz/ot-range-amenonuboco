@@ -141,15 +141,52 @@ class Topology(BaseModel):
 
         segment_name_set = set(seg_names)
         asset_name_set = set(asset_names)
+        segments_by_name = {s.name: s for s in self.segments}
 
-        # 資産が参照するセグメントが実在するか
+        # 資産が参照するセグメントが実在するか。あわせて、同一資産が同じ
+        # セグメントに二重接続していないか、宣言したIPがそのセグメントの
+        # CIDR範囲に収まっているかも検証する(Phase5後の地盤固めで追加、
+        # 決定事項#75)。いずれも「宣言としては通るが docker compose up で
+        # 初めて壊れる/意図せず動く」類の穴であり、宣言時に弾く。
         for asset in self.assets:
+            connected_segments: set[str] = set()
             for net in asset.networks:
                 if net.segment not in segment_name_set:
                     raise ValueError(
                         f"asset '{asset.name}' references undefined segment "
                         f"'{net.segment}'"
                     )
+                if net.segment in connected_segments:
+                    raise ValueError(
+                        f"asset '{asset.name}' connects to segment "
+                        f"'{net.segment}' more than once"
+                    )
+                connected_segments.add(net.segment)
+                if net.ip is not None:
+                    seg = segments_by_name[net.segment]
+                    if ipaddress.ip_address(net.ip) not in ipaddress.ip_network(
+                        seg.cidr, strict=True
+                    ):
+                        raise ValueError(
+                            f"asset '{asset.name}' ip '{net.ip}' is not within "
+                            f"the cidr '{seg.cidr}' of segment '{net.segment}'"
+                        )
+
+        # 同一セグメント内でのIP重複チェック(決定事項#75)。前身ot-ids-verumの
+        # サブネット/IP衝突(罠#004)と同種で、docker compose up時にDockerが
+        # 弾く前に宣言レベルで検出する。
+        ips_per_segment: dict[str, dict[str, str]] = {}
+        for asset in self.assets:
+            for net in asset.networks:
+                if net.ip is None:
+                    continue
+                seen = ips_per_segment.setdefault(net.segment, {})
+                if net.ip in seen:
+                    raise ValueError(
+                        f"duplicate ip '{net.ip}' on segment '{net.segment}': "
+                        f"used by both '{seen[net.ip]}' and '{asset.name}'"
+                    )
+                seen[net.ip] = asset.name
 
         # routing.gateway が実在する l3-router 資産を指しているか
         if self.routing is not None:
@@ -239,6 +276,21 @@ class Manifest(BaseModel):
             from .attack import validate_attack
 
             validate_attack(self.attack, self.topology)
+
+        # structuring層はミラーされたトラフィックを構造化する層であり、
+        # instrumentation層(ミラーリング)が前提になる。structuringだけを宣言
+        # してinstrumentationを宣言しないと、structurer資産の起動コマンドが
+        # 生成されず(compose.py側でミラー元が無いため)、tsharkパイプラインが
+        # 「宣言したのに静かに動かない」状態になる。これはPhase4でattack.nodes
+        # を廃した理由(生成器が静かに取りこぼす、決定事項#53)と同型の問題の
+        # ため、宣言時に弾く(決定事項#76)。
+        if self.structuring is not None and self.structuring.protocols:
+            if self.instrumentation is None:
+                raise ValueError(
+                    "structuring層(protocols)を宣言するには instrumentation層が"
+                    "必須です(構造化はミラーされたトラフィックを対象にするため)。"
+                    "instrumentation.mirror_to を宣言してください"
+                )
 
         return self
 

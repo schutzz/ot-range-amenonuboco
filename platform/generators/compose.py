@@ -17,7 +17,6 @@ import yaml
 
 from schema import (
     Asset,
-    Attack,
     Detection,
     Instrumentation,
     Manifest,
