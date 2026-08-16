@@ -38,3 +38,7 @@ target/
 .DS_Store
 .vscode/
 .idea/
+
+# プロビジョナの生成物(manifests/*.yaml がソース、これらはビルド成果物)
+*.docker-compose.yml
+*.network-diagram.html

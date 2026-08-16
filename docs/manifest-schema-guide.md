@@ -120,7 +120,7 @@ topology:
 | `networks` | ✅ | **接続するセグメントの配列**（マルチホーム対応）。各要素は `segment`（必須）と `ip`（任意、省略時は動的割当） |
 | `overrides` | ✕ | ロールのプリセットを上書きする例外設定（§2.4） |
 
-> **重要：`networks` は必ず配列**。単一接続でも配列で書きます。verum の `wan_router`（5接続）や攻撃者ノード（2接続）のようなマルチホームを、例外扱いせず一貫して表現するためです。
+> **重要：`networks` は必ず配列**。単一接続でも配列で書きます。前身 `ot-ids-verum` の `wan_router`（5接続）や攻撃者ノード（2接続）のようなマルチホームを、例外扱いせず一貫して表現するためです。
 
 ### 2.3 ルーティング（`routing`）
 
@@ -132,7 +132,7 @@ topology:
 
 セグメント間のルーティングは、`gateway` に指定した資産を経由して**プロビジョナが自動生成**します。各ノードに `ip route add ... via <gateway>` を手で書く必要はありません。
 
-> **設計意図**：verum では各コンテナの起動コマンドに `ip route add` が生のシェルで散在していました。これを接続情報から宣言的に導出することで、記述漏れ・不整合を防ぎます。
+> **設計意図**：前身 `ot-ids-verum` では各コンテナの起動コマンドに `ip route add` が生のシェルで散在していました。これを接続情報から宣言的に導出することで、記述漏れ・不整合を防ぎます。
 
 ### 2.4 実行属性のプリセットと上書き（`overrides`）
 
@@ -152,9 +152,9 @@ topology:
 
 ### 2.5 初期化処理をマニフェストに書かないこと
 
-verum では各ノードの起動コマンドに「`apt-get install ...` ＋ `ip route add ...` ＋ アプリ起動」が生のシェル文字列で埋め込まれていました。**Amenonuboco ではこれらをマニフェストに持ち込みません**。
+前身 `ot-ids-verum` では各ノードの起動コマンドに「`apt-get install ...` ＋ `ip route add ...` ＋ アプリ起動」が生のシェル文字列で埋め込まれていました。**Amenonuboco ではこれらをマニフェストに持ち込みません**。
 
-| verum で生シェルだったもの | Amenonuboco での扱い |
+| 前身で生シェルだったもの | Amenonuboco での扱い |
 |---|---|
 | `apt-get install ...`（パッケージ導入） | **ビルド済みイメージに焼く**（マニフェストで毎回宣言しない） |
 | `ip route add ...`（ルーティング） | **接続情報から自動生成**（§2.3） |
@@ -189,7 +189,7 @@ instrumentation:
 - **冪等化**（再実行で重複が蓄積しないこと）
 - 双方向カバレッジの保証（片方向欠落を作らないこと）
 
-> **設計意図**：verum が `setup_mirror.sh` の手書きで繰り返し踏んだミラーリングの非対称性・冪等化漏れ・インターフェース名シャッフルを、生成ロジック側で構造的に排除します。観測の死角が生じたかどうかは、ネットワーク図にそのまま反映されます。
+> **設計意図**：前身 `ot-ids-verum` が `setup_mirror.sh` の手書きで繰り返し踏んだミラーリングの非対称性・冪等化漏れ・インターフェース名シャッフルを、生成ロジック側で構造的に排除します。観測の死角が生じたかどうかは、ネットワーク図にそのまま反映されます。
 
 ---
 
@@ -239,7 +239,7 @@ structuring:
 
 ### 5.2 資産ロール（`role`）
 
-| ロール | 意味 | verum の該当例 |
+| ロール | 意味 | 前身 `ot-ids-verum` での該当例 |
 |---|---|---|
 | `ot-asset` | 被害者となりうるOT資産（PLC/RTU/HMI/IED/SCADAマスター） | cc_scada_master, sub_b_rtu_hmi, sub_b_plc_01, sub_a_ied_01 |
 | `l3-router` | セグメント間ルータ（`ip_forward` 有効） | wan_router |
@@ -263,10 +263,10 @@ detection:
   plugins:
     - name: signal-1-zone-violation
       type: vector-transform
-      source: ../scenarios/verum-signals/enrich_trace.vrl
+      source: ../scenarios/legacy-power-grid-signals/enrich_trace.vrl
     - name: signal-6-killchain
       type: sidecar
-      source: ../scenarios/verum-signals/killchain_eql_poller.py
+      source: ../scenarios/legacy-power-grid-signals/killchain_eql_poller.py
   evaluation_harness:
     enabled: false
 ```
@@ -278,11 +278,11 @@ detection:
 | `plugins[].source` | ✅ | ロジック本体のパス（**マニフェスト外の資産**を指す） |
 | `evaluation_harness.enabled` | ✕ | 正解ラベル源を載せるか（既定 `false`） |
 
-> **verum の Signal 群の流用**：verum が作り込んだ Signal 1〜8 は、`source` で指すだけの外部資産として、そのまま1シナリオとして差し込めます。プラットフォーム本体は検知ロジックを持ちません。
+> **前身の Signal 群の流用**：`ot-ids-verum` が作り込んだ Signal 1〜8 は、`source` で指すだけの外部資産として、そのまま1シナリオとして差し込めます。プラットフォーム本体は検知ロジックを持ちません。
 
 ### 評価ハーネス（正解ラベル源）について
 
-verum の `oob_redis`/`oob_webdis`（攻撃の正解ラベルをOut-of-Bandで供給する評価専用の仕組み）は、**そのままは持ち込みません**。旧実装は `io.popen` によるシェル呼び出しに依存しており、ポータビリティとセキュリティの両面で作り直しが必要なためです。マニフェストでは「評価ハーネスを載せる口」として抽象化し、実体は sidecar がファイル/enrichment_table へ書き出す方式に再設計します。既定は無効です。
+前身 `ot-ids-verum` の `oob_redis`/`oob_webdis`（攻撃の正解ラベルをOut-of-Bandで供給する評価専用の仕組み）は、**そのままは持ち込みません**。旧実装は `io.popen` によるシェル呼び出しに依存しており、ポータビリティとセキュリティの両面で作り直しが必要なためです。マニフェストでは「評価ハーネスを載せる口」として抽象化し、実体は sidecar がファイル/enrichment_table へ書き出す方式に再設計します。既定は無効です。
 
 ---
 
@@ -328,16 +328,18 @@ attack:
 
 ---
 
-## 8. 完全な例（verum のスライスを1枚で）
+## 8. 完全な例（前身環境のスライスを1枚で）
 
-5層すべて、マルチホーム、IP動的割当、tshark例外、Caldera を1枚に含む最小例です。
+5層すべて、マルチホーム、IP動的割当、tshark例外、Caldera を1枚に含む最小例です。実ファイルは [`manifests/power-grid-reference.yaml`](../manifests/power-grid-reference.yaml)（トポロジ層のみ、Phase 1時点）にあります。
+
+> 命名注記：`metadata.name` はドメイン（電力網ラボ）を表す名前とし、前身プロジェクト名を識別子として名乗りません。Amenonuboco のリポジトリ内で前身の名前がファイル名・識別子に出ると、閲覧者がどちらのプロジェクトの資産か混同しうるためです。
 
 ```yaml
 apiVersion: amenonuboco/v1alpha1
 kind: CyberRange
 metadata:
-  name: verum-slice
-  description: verum の代表要素を1枚に凝縮したリファレンススライス
+  name: power-grid-reference
+  description: 前身プロジェクト ot-ids-verum の電力網ラボの代表要素を1枚に凝縮したリファレンススライス
 
 topology:
   segments:
@@ -407,8 +409,8 @@ structuring:
 
 detection:
   plugins:
-    - { name: signal-1-zone-violation, type: vector-transform, source: ../scenarios/verum-signals/enrich_trace.vrl }
-    - { name: signal-6-killchain,      type: sidecar,          source: ../scenarios/verum-signals/killchain_eql_poller.py }
+    - { name: signal-1-zone-violation, type: vector-transform, source: ../scenarios/legacy-power-grid-signals/enrich_trace.vrl }
+    - { name: signal-6-killchain,      type: sidecar,          source: ../scenarios/legacy-power-grid-signals/killchain_eql_poller.py }
   evaluation_harness:
     enabled: false
 
@@ -446,7 +448,7 @@ attack:
 - **記述言語の最終確定**：YAML想定だが、記法の細部（例：`networks` のインライン記法の許容範囲）は Phase 1 の実装で詰める。
 - **ロールプリセットの具体的な中身**：各ロールが持つ capability・sysctl・既定接続セグメント・実行属性の完全な定義。
 - **初期化処理のエスケープハッチ**：どうしても宣言的に表せない起動処理を、限定的に許容する仕組みが要るか。
-- **構造化の tshark 移行の互換性**：verum で Zeek/ICSNPP 固有ログに依存していた検知（特に SBO バイパス検知が使う `dnp3_control.log` のオブジェクトレベル情報）を、tshark が同等に供給できるか。供給できない場合は Spicy/Zeek 例外ルートで補う。
+- **構造化の tshark 移行の互換性**：前身 `ot-ids-verum` で Zeek/ICSNPP 固有ログに依存していた検知（特に SBO バイパス検知が使う `dnp3_control.log` のオブジェクトレベル情報）を、tshark が同等に供給できるか。供給できない場合は Spicy/Zeek 例外ルートで補う。
 - **検知プラグインの `type` の語彙**：`vector-transform`/`sidecar` 以外に必要な載せ方があるか。
 - **ネットワーク図のビュー分岐**：防御側・統裁側向けの全開示版に加え、攻撃側・受講者向けの情報を絞ったビュー（fog of war）を出すか。α版は全開示版のみ対象。
 

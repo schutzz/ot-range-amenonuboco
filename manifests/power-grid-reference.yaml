@@ -1,0 +1,87 @@
+# 前身プロジェクト `ot-ids-verum` の電力網ラボのトポロジ層を1枚に凝縮した
+# リファレンススライス。docs/manifest-schema-guide.md §8 の完全な例に対応
+# (instrumentation/structuring/detection/attack は Phase 1のスコープ外の
+# ため未検証のまま保持される)。Phase 1の等価性検証(Phase1-Provisioner.md
+# §1)にそのまま使う。
+#
+# 命名注記: ファイル名・metadata.name はドメイン(電力網ラボ)を表す名前とし、
+# 前身プロジェクト名("verum")を識別子として名乗らない。本プロジェクト
+# (Amenonuboco)のリポジトリ内で前身の名前がファイル名に出ると、閲覧者が
+# どちらのプロジェクトの資産か混同しうるため。
+apiVersion: amenonuboco/v1alpha1
+kind: CyberRange
+metadata:
+  name: power-grid-reference
+  description: 前身プロジェクト ot-ids-verum の電力網ラボの代表要素を1枚に凝縮したリファレンススライス
+
+topology:
+  segments:
+    - { name: cc_lan,       cidr: 10.1.10.0/24,  kind: it-core }
+    - { name: wan_link,     cidr: 172.18.0.0/24, kind: wan-edge }
+    - { name: sub_b_lan,    cidr: 10.1.30.0/24,  kind: ot-lan }
+    - { name: sub_a_l2_lan, cidr: 10.1.20.0/24,  kind: ot-l2 }
+    - { name: mirror_link,  cidr: 10.1.99.0/24,  kind: observation }
+  routing:
+    gateway: wan_router
+  assets:
+    - name: wan_router
+      role: l3-router
+      image: debian:bullseye-slim
+      networks:
+        - { segment: cc_lan,       ip: 10.1.10.254 }
+        - { segment: wan_link,     ip: 172.18.0.254 }
+        - { segment: sub_b_lan,    ip: 10.1.30.254 }
+        - { segment: sub_a_l2_lan, ip: 10.1.20.254 }
+        - { segment: mirror_link,  ip: 10.1.99.254 }
+
+    - name: cc_scada_master
+      # Phase 1はトポロジ/ルーティング層のみの等価性検証が目的であり、前身の
+      # 実アプリ(scada_mtu_server.py)の再現はスコープ外(Phase 4の検知・攻撃層
+      # 差し込み口で扱う)。素のベースイメージ+待機コマンドで代替する。
+      role: ot-asset
+      image: python:3.10-slim
+      networks:
+        - { segment: cc_lan, ip: 10.1.10.10 }
+      overrides:
+        command: "tail -f /dev/null"
+
+    - name: sub_b_rtu_hmi
+      # Alpine系イメージ(apk)。ルーティング生成のapk経路を検証する対象でもある
+      # (Phase1決定事項#21)。
+      role: ot-asset
+      image: nodered/node-red:3.1.0
+      networks:
+        - { segment: sub_b_lan, ip: 10.1.30.10 }
+      overrides:
+        ports: [ "18800:1880" ]
+        command: "/usr/src/node-red/entrypoint.sh"
+
+    - name: sub_a_ied_02
+      # 同上、攻撃スクリプト(send_goose_poison.py)の再現もPhase 1のスコープ外。
+      role: attacker-insider
+      image: python:3.10-slim
+      networks:
+        - { segment: sub_a_l2_lan, ip: 10.1.20.11 }
+      overrides:
+        command: "tail -f /dev/null"
+
+    - name: vector
+      role: detection-infra
+      image: timberio/vector:0.46.0-alpine
+      networks:
+        - { segment: cc_lan, ip: 10.1.10.35 }
+
+    - name: elasticsearch
+      role: detection-infra
+      image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+      networks:
+        - { segment: cc_lan, ip: 10.1.10.40 }
+
+    - name: es_enrich_refresher
+      # Alpine系(busybox)イメージ。ports/entrypointを持たない検知sidecarの例。
+      role: detection-infra
+      image: curlimages/curl:latest
+      networks:
+        - { segment: cc_lan }   # IP動的割当
+      overrides:
+        command: "while true; do curl -s -X POST http://elasticsearch:9200/_enrich/policy/detection_lookup_policy/_execute; sleep 60; done"

@@ -1,0 +1,68 @@
+# ロールごとの実行属性プリセット(Phase1決定事項#15)。
+# manifests/*.yaml の asset.overrides で明示指定されない限り、ここでの既定値が
+# 適用される(Phase0決定事項#10: 「公開ポート・実行属性はロールのプリセットへ」)。
+#
+# 各値は前身(ot-ids-verum)の実データ(docker-compose.ymlのcap_add/sysctls)から逆算した初期値
+# (docs/manifest-schema-guide.md §5.2 のロール一覧に対応)。Phase1実装を通じて
+# 見つかった不足はここに追記し、Phase1計画書の決定事項として記録する。
+#
+# 注記(mirror_link多重接続の扱い): mirror_link(観測用セグメント)と他セグメントに
+# 同時接続する資産(パケット観測+検知結果の書き戻しを行うsidecar等)は、
+# ip_forwardが意図せず有効化されるリスクを持つ。これはロール単体では決まらず
+# 資産ごとの実際の接続構成に依存する動的な規則のため、ここでは静的プリセット
+# として表現せず、generators/compose.py 側でトポロジを見て生成する
+# (Phase1決定事項#19)。
+
+roles:
+  ot-asset:
+    # 被害者となりうるOT資産(PLC/RTU/HMI/SCADAマスター)。
+    # 前身(ot-ids-verum)での該当例: cc_scada_master, sub_b_rtu_hmi, sub_b_plc_01, sub_a_ied_01
+    cap_add: [NET_ADMIN]
+    sysctls: []
+
+  l3-router:
+    # セグメント間ルータ。ip_forwardを有効化し、全セグメントへの経路の起点となる。
+    # 前身(ot-ids-verum)での該当例: wan_router
+    # デフォルトのdebian:bullseye-slim等ベアOSイメージにはアプリ本体が無く、
+    # 無指定だとCMD(bash)が標準入力を持たずに即終了してしまうため、
+    # 既定コマンドで待機させる(overrides.commandがあればそちらを優先)。
+    cap_add: [NET_ADMIN, NET_RAW]
+    sysctls: ["net.ipv4.ip_forward=1"]
+    default_command: "tail -f /dev/null"
+
+  detection-infra:
+    # 検知基盤(取り込み・保存・可視化・検知sidecar)。
+    # 前身(ot-ids-verum)での該当例: vector, elasticsearch, grafana, es_enrich_refresher,
+    #          killchain_eql_poller, signal_comparison_reporter
+    # 追加capabilityが不要な構成が大半。mirror_link多重接続の個体は上記注記の
+    # 動的ルールでip_forward=0が別途付与される。
+    cap_add: []
+    sysctls: []
+
+  observer:
+    # 観測ノード(tshark/Zeek/Suricata)。パケットキャプチャに必要な権限を持つ。
+    # 前身(ot-ids-verum)での該当例: zeek_tap, suricata_ids
+    cap_add: [NET_ADMIN, NET_RAW]
+    sysctls: []
+
+  eval-harness:
+    # 正解ラベル源(評価専用、Phase1では detection.evaluation_harness 未実装のため
+    # 評価対象外)。前身(ot-ids-verum)での該当例: oob_redis, oob_webdis
+    cap_add: []
+    sysctls: []
+
+  attacker-external:
+    # 境界外の攻撃者。前身(ot-ids-verum)での該当例: external_attacker
+    cap_add: [NET_ADMIN, NET_RAW]
+    sysctls: []
+
+  attacker-internal:
+    # 内部に置いた踏み台攻撃者。前身(ot-ids-verum)での該当例: red-team
+    cap_add: [NET_ADMIN]
+    sysctls: []
+
+  attacker-insider:
+    # 侵害された正規資産(MACなりすまし等、送信元詐称が要るためNET_RAWを持つ)。
+    # 前身(ot-ids-verum)での該当例: sub_a_ied_02
+    cap_add: [NET_ADMIN, NET_RAW]
+    sysctls: []
