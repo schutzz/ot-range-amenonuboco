@@ -1,3 +1,5 @@
+from .attack import Attack, AttackEngine, CalderaAgent, CalderaEngine
+from .detection import Detection, DetectionPlugin, EvaluationHarness
 from .instrumentation import Instrumentation
 from .loader import ManifestLoadError, load_manifest
 from .presets import (
@@ -27,6 +29,13 @@ __all__ = [
     "AssetNetwork",
     "AssetOverrides",
     "AssetRole",
+    "Attack",
+    "AttackEngine",
+    "CalderaAgent",
+    "CalderaEngine",
+    "Detection",
+    "DetectionPlugin",
+    "EvaluationHarness",
     "Instrumentation",
     "Manifest",
     "ManifestLoadError",

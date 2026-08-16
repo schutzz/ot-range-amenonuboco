@@ -9,6 +9,7 @@ docs/manifest-schema-guide.md の記法と一致させている)。
 from __future__ import annotations
 
 import ipaddress
+from pathlib import Path
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
@@ -31,6 +32,7 @@ AssetRole = Literal[
     "observer",
     "structurer",  # Phase3決定事項#41: 構造化パイプライン(tshark+バルクローダー)実行ノード
     "eval-harness",
+    "attack-engine",  # Phase4決定事項#58: 攻撃エミュレーションエンジン(Caldera server)
     "attacker-external",
     "attacker-internal",
     "attacker-insider",
@@ -186,9 +188,9 @@ class Topology(BaseModel):
 
 
 class Manifest(BaseModel):
-    """マニフェスト全体。detection/attack はまだモデル化するまで、未検証の
-    生データ(dict)として保持するのみ。instrumentation(Phase2)・structuring
-    (Phase3)はモデル化済み。
+    """マニフェスト全体。5層すべてをモデル化済み(instrumentation=Phase2、
+    structuring=Phase3、detection/attack=Phase4)。トポロジ層以外はすべて任意で
+    あり、宣言が無ければ対応する生成を一切行わない。
     """
 
     model_config = {"populate_by_name": True}
@@ -199,17 +201,45 @@ class Manifest(BaseModel):
     topology: Topology
     instrumentation: Optional["Instrumentation"] = None
     structuring: Optional["Structuring"] = None
+    detection: Optional["Detection"] = None
+    attack: Optional["Attack"] = None
 
-    # Phase 4以降でモデル化するまでの暫定(未検証の生データ)
-    detection: Optional[dict] = None
-    attack: Optional[dict] = None
+    # マニフェスト自身が置かれているディレクトリ(loaderが読み込み時に設定する)。
+    # 相対パスで書かれた外部資産参照(detection.plugins[].source、Calderaの
+    # abilities_path等)を解決する基点になる。マニフェストの宣言内容ではなく
+    # 「どこから読んだか」というメタ情報のため、シリアライズ対象から除外する。
+    # 未設定(dictから直接model_validateした場合)はカレントディレクトリ基点に
+    # フォールバックする(Phase4決定事項#60)。
+    source_dir: Optional[Path] = Field(default=None, exclude=True)
+
+    def resolve_path(self, path_str: str) -> Path:
+        """マニフェスト内に書かれた外部資産パスを絶対パスへ解決する。"""
+        p = Path(path_str)
+        if p.is_absolute():
+            return p
+        base = self.source_dir if self.source_dir is not None else Path.cwd()
+        return (base / p).resolve()
 
     @model_validator(mode="after")
-    def _validate_instrumentation_references(self) -> "Manifest":
+    def _validate_cross_layer_references(self) -> "Manifest":
+        """層をまたぐ相互参照の検証。各層のモデル単体はtopologyを知らないため、
+        クロスバリデーションはここでまとめて行う(Phase2で確立した方式)。
+        """
         if self.instrumentation is not None:
             from .instrumentation import validate_instrumentation
 
             validate_instrumentation(self.instrumentation, self.topology)
+
+        if self.detection is not None:
+            from .detection import validate_detection
+
+            validate_detection(self.detection, self.topology)
+
+        if self.attack is not None:
+            from .attack import validate_attack
+
+            validate_attack(self.attack, self.topology)
+
         return self
 
 
@@ -217,6 +247,8 @@ class Manifest(BaseModel):
 # を参照するため、Manifestの型ヒントは文字列参照にしておき、ここで解決する)。
 # structuring.py はtopology.pyに依存しないため循環の心配はないが、統一的に
 # ここでまとめて解決する。
+from .attack import Attack  # noqa: E402
+from .detection import Detection  # noqa: E402
 from .instrumentation import Instrumentation  # noqa: E402
 from .structuring import Structuring  # noqa: E402
 

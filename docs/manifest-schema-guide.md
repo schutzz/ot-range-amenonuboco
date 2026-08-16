@@ -258,6 +258,7 @@ structuring:
 | `detection-infra` | 検知基盤（取り込み・保存・可視化・検知 sidecar） | vector, elasticsearch, grafana, 各 sidecar |
 | `observer` | 観測ノード（生パケットをそのまま確認する用途、tcpdump 等） | zeek_tap, suricata_ids |
 | `structurer` | 構造化パイプライン実行ノード（tshark ＋ バルクローダー、§4） | （前身では Vector＋Zeek が担っていた役割） |
+| `attack-engine` | 攻撃エミュレーションエンジン（Caldera server、§7） | （前身では常設せず Ability/Adversary 資産のみ保有） |
 | `eval-harness` | 正解ラベル源（評価専用、§6参照） | oob_redis, oob_webdis |
 | `attacker-external` | 境界外の攻撃者 | external_attacker |
 | `attacker-internal` | 内部に置いた踏み台攻撃者 | red-team |
@@ -269,29 +270,37 @@ structuring:
 
 ## 6. ④ 検知層（`detection`）
 
-検知ロジックの**本体はマニフェストに書きません**。ここで宣言するのは「どのロジックを、どのコンポーネントに、どう載せるか」という差し込み口だけです。
+検知ロジックの**本体はマニフェストに書きません**。ここで宣言するのは「どのロジックを、どの資産に、どう載せるか」という差し込み口だけです。
 
 ```yaml
 detection:
   plugins:
-    - name: signal-1-zone-violation
-      type: vector-transform
-      source: ../scenarios/legacy-power-grid-signals/enrich_trace.vrl
     - name: signal-6-killchain
-      type: sidecar
+      type: sidecar                 # 現在は sidecar のみ
+      host: killchain_detector      # topology.assets の資産を名前で指す
       source: ../scenarios/legacy-power-grid-signals/killchain_eql_poller.py
+      requires: [ requests ]        # プラグインが必要とする Python パッケージ
+      config:                       # プラグインへ環境変数として注入される
+        ES_URL: http://elasticsearch:9200
   evaluation_harness:
     enabled: false
 ```
 
 | フィールド | 必須 | 説明 |
 |---|---|---|
-| `plugins[].name` | ✅ | 検知プラグインの識別名 |
-| `plugins[].type` | ✅ | 載せ方（`vector-transform` / `sidecar` / …） |
-| `plugins[].source` | ✅ | ロジック本体のパス（**マニフェスト外の資産**を指す） |
-| `evaluation_harness.enabled` | ✕ | 正解ラベル源を載せるか（既定 `false`） |
+| `plugins[].name` | ✅ | 検知プラグインの識別名（マニフェスト内で一意） |
+| `plugins[].type` | ✅ | 載せ方。現在は `sidecar` のみ（後述） |
+| `plugins[].host` | ✅ | プラグインを実行する資産の名前（**`topology.assets` に実在すること**）。1つのホストに複数プラグインを載せられます |
+| `plugins[].source` | ✅ | ロジック本体のパス（**マニフェスト外の資産**を指す。相対パスはマニフェスト自身の位置が基点） |
+| `plugins[].requires` | ✕ | プラグインが必要とする Python パッケージ。プロビジョナが導入コマンドへ合成します（生の `pip install` は書きません） |
+| `plugins[].config` | ✕ | プラグインへ**環境変数として注入**される設定。接続先などをプラグイン内にハードコードさせないための仕組みです |
+| `evaluation_harness.enabled` | ✕ | 正解ラベル源を載せるか（既定 `false`。実体は今後のバージョンで提供） |
 
-> **前身の Signal 群の流用**：`ot-ids-verum` が作り込んだ Signal 1〜8 は、`source` で指すだけの外部資産として、そのまま1シナリオとして差し込めます。プラットフォーム本体は検知ロジックを持ちません。
+> **なぜ `host` で資産を指すのか**：コンテナ（資産）を宣言する場所は `topology.assets` の1箇所に統一しています。検知プラグインはコンテナを新たに作らず、既にトポロジに居る資産に「載る」だけです。「そこにどう繋がって存在するか」はトポロジ層が、「そこで何を実行するか」は検知層が担う、という責務の分け方です。
+
+> **`type` が `sidecar` のみである理由**：sidecar 型は取り込みエンジンから完全に独立しています（Elasticsearch を読み書きするだけで、そのデータを誰が構造化したかを知りません）。この独立性こそが差し込み口の望ましい性質です。特定の処理系（例：Vector の VRL）に依存する型は、プラットフォーム本体がその処理系を背負うことになるため設けていません。
+
+> **前身の Signal 群の流用**：`ot-ids-verum` が作り込んだ Signal 群のうち、Elasticsearch をポーリングする sidecar 型（Signal 6 など）は、`host` と `source` を指すだけでそのまま1シナリオとして差し込めます（`config` で接続先を渡せば、スクリプト側の改修は最小限で済みます）。一方、特定処理系で書かれたロジック（VRL の transform など）は、同等の判定を sidecar として書き直す必要があります。プラットフォーム本体は検知ロジックを一切持ちません。
 
 ### 評価ハーネス（正解ラベル源）について
 
@@ -303,41 +312,48 @@ detection:
 
 攻撃の**中身（ペイロード・台本・Ability定義）はマニフェストに書きません**。宣言するのは「攻撃者がそこに立ち、OT網に手を伸ばせる実行環境」までです。
 
+**攻撃者ノード自体は、他の資産と同じく `topology.assets` に宣言します**（攻撃者ロールを持つ、環境の一部だからです）。攻撃層が宣言するのは、資産そのものではなく「資産に何を載せるか」——攻撃エンジン（Caldera）の配線と、既存資産への agent 仕込み——だけです。
+
 ```yaml
-attack:
-  nodes:
+# 攻撃者ノードは topology.assets 側に置く
+topology:
+  assets:
     - name: external_attacker
       role: attacker-external
       image: ./external_attacker
       networks:
-        - { segment: wan_link, ip: 172.16.0.99 }
-        - { segment: cc_lan,   ip: 10.0.10.98 }
-      toolchain: [ python3, scapy ]
-    - name: red_team
-      role: attacker-internal
-      image: ./red-team
+        - { segment: wan_link, ip: 172.18.0.99 }
+        - { segment: cc_lan,   ip: 10.1.10.98 }
+    - name: caldera_server
+      role: attack-engine
+      image: ghcr.io/mitre/caldera:latest
       networks:
-        - { segment: cc_lan, ip: 10.0.10.99 }
-      toolchain: [ python3, scapy ]
+        - { segment: cc_lan, ip: 10.1.10.70 }
+      overrides:
+        ports: [ "8888:8888" ]
+
+# 攻撃層は「何を載せるか」だけを宣言する
+attack:
   engine:
     caldera:
-      enabled: true
-      server_segment: cc_lan
+      host: caldera_server          # topology.assets の attack-engine 資産を参照
       abilities_path: ../attack-assets/caldera/abilities
       adversaries_path: ../attack-assets/caldera/adversaries
+  agents:
+    - host: external_attacker       # 既存の攻撃者資産に agent を仕込む
+      type: sandcat
 ```
 
 | フィールド | 必須 | 説明 |
 |---|---|---|
-| `nodes[]` | ✅ | 攻撃者ノード。`networks` はトポロジ層と同じ配列記法（マルチホーム対応） |
-| `nodes[].toolchain` | ✕ | ノードに用意する攻撃ツールチェーン（実行環境） |
-| `engine.caldera.enabled` | ✕ | Caldera を載せるか |
-| `engine.caldera.server_segment` | ✕ | Caldera server を置くセグメント |
-| `engine.caldera.abilities_path` / `adversaries_path` | ✕ | Caldera が読む Ability/Adversary の**外部パス**（マニフェスト外資産をロードするだけ） |
+| `engine.caldera.host` | ✕ | Caldera server を動かす資産の名前（`topology.assets` の `attack-engine` ロール資産を指す） |
+| `engine.caldera.abilities_path` / `adversaries_path` | ✕ | Caldera が読む Ability/Adversary の**外部パス**（マニフェスト外資産を読み取り専用でマウントするだけ） |
+| `agents[].host` | ✅※ | agent を仕込む資産の名前（`topology.assets` を指す）。※`agents` を書く場合は `engine.caldera` が必須 |
+| `agents[].type` | ✕ | agent の種類（既定 `sandcat`） |
 
-> **攻撃をパッケージ化しない**：攻撃者ノードは汎用の実行環境（Python/scapy、必要なら Caldera agent 入り）として用意します。「何を、いつ、どう撃つか」は、Caldera の UI/API や手元のスクリプトから実行時に自由に組み立てます。攻撃の追加・変更は Caldera 側（マニフェスト外）で完結し、環境定義には一切波及しません。
+> **攻撃をパッケージ化しない**：攻撃者ノードは汎用の実行環境として用意します。「何を、いつ、どう撃つか」は、Caldera の UI/API や手元のスクリプトから実行時に自由に組み立てます。攻撃の追加・変更は Caldera 側（マニフェスト外）で完結し、環境定義には一切波及しません。
 >
-> **Caldera は既定エンジンであって強制ではありません**。素のスクリプトを撃ちたい場合も、攻撃者ノードの実行環境でそのまま実行できます。
+> **Caldera は既定エンジンであって強制ではありません**。`attack` 層も `engine.caldera` も任意です。宣言しなければ攻撃関連の生成は一切行われず、攻撃者ロールの資産を `topology.assets` に置いて素のスクリプトを撃つ運用が、追加の宣言なしで成立します。
 
 ---
 
@@ -405,6 +421,20 @@ topology:
       image: curlimages/curl:latest
       networks:
         - { segment: cc_lan }        # IP動的割当
+    # 検知プラグインのホスト・攻撃者・攻撃エンジンも、すべて資産として置く
+    - name: killchain_detector
+      role: detection-infra
+      image: python:3.11-slim
+      networks:
+        - { segment: cc_lan, ip: 10.0.10.80 }
+    # 攻撃者ノード sub_a_ied_02 は上で ot 資産群と一緒に宣言済み
+    - name: caldera_server
+      role: attack-engine
+      image: ghcr.io/mitre/caldera:latest
+      networks:
+        - { segment: cc_lan, ip: 10.0.10.70 }
+      overrides:
+        ports: [ "8888:8888" ]
 
 instrumentation:
   mirror_to: mirror_link
@@ -422,32 +452,25 @@ structuring:
 
 detection:
   plugins:
-    - { name: signal-1-zone-violation, type: vector-transform, source: ../scenarios/legacy-power-grid-signals/enrich_trace.vrl }
-    - { name: signal-6-killchain,      type: sidecar,          source: ../scenarios/legacy-power-grid-signals/killchain_eql_poller.py }
+    - name: signal-6-killchain
+      type: sidecar
+      host: killchain_detector
+      source: ../scenarios/legacy-power-grid-signals/killchain_eql_poller.py
+      requires: [ requests ]
+      config: { ES_URL: http://elasticsearch:9200 }
   evaluation_harness:
     enabled: false
 
 attack:
-  nodes:
-    - name: external_attacker
-      role: attacker-external
-      image: ./external_attacker
-      networks:
-        - { segment: wan_link, ip: 172.16.0.99 }
-        - { segment: cc_lan,   ip: 10.0.10.98 }
-      toolchain: [ python3, scapy ]
-    - name: red_team
-      role: attacker-internal
-      image: ./red-team
-      networks:
-        - { segment: cc_lan, ip: 10.0.10.99 }
-      toolchain: [ python3, scapy ]
+  # 攻撃者ノード(sub_a_ied_02)・Caldera server(caldera_server)は
+  # 上の topology.assets 側に宣言済み。ここでは載せるものだけを書く。
   engine:
     caldera:
-      enabled: true
-      server_segment: cc_lan
+      host: caldera_server
       abilities_path: ../attack-assets/caldera/abilities
       adversaries_path: ../attack-assets/caldera/adversaries
+  agents:
+    - { host: sub_a_ied_02, type: sandcat }
 ```
 
 このマニフェスト1枚から、プロビジョナが「動く環境」を、レンダラが「防御側・統裁側向けHTMLネットワーク図」を生成します。図はこのマニフェストから機械生成されるため、定義を変えれば図も変わり、実態との乖離が生じません。
@@ -462,7 +485,7 @@ attack:
 - **ロールプリセットの具体的な中身**：各ロールが持つ capability・sysctl・既定接続セグメント・実行属性の完全な定義。
 - **初期化処理のエスケープハッチ**：どうしても宣言的に表せない起動処理を、限定的に許容する仕組みが要るか。
 - **構造化の tshark 移行の互換性**：前身 `ot-ids-verum` で Zeek/ICSNPP 固有ログに依存していた検知（特に SBO バイパス検知が使う `dnp3_control.log` のオブジェクトレベル情報）を、tshark が同等に供給できるか。供給できない場合は Spicy/Zeek 例外ルートで補う。
-- **検知プラグインの `type` の語彙**：`vector-transform`/`sidecar` 以外に必要な載せ方があるか。
+- **検知プラグインの `type` の語彙**：現在は `sidecar` のみ。Elasticsearch 側の機構（ingest pipeline / enrich policy 等）を第2の型として追加するかは、必要になった時点で判断する。
 - **ネットワーク図のビュー分岐**：防御側・統裁側向けの全開示版に加え、攻撃側・受講者向けの情報を絞ったビュー（fog of war）を出すか。α版は全開示版のみ対象。
 
 ---

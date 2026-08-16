@@ -61,6 +61,16 @@ roles:
     cap_add: []
     sysctls: []
 
+  attack-engine:
+    # 攻撃エミュレーションエンジン(Caldera server)(Phase4決定事項#58)。
+    # 管理UI/APIを提供するアプリ本体を持つイメージを前提とするため、
+    # detection-infraと同じく追加capabilityは持たせない(攻撃を"撃つ"のは
+    # agentを仕込まれた攻撃者ノード側であり、server自身ではないため)。
+    # 前身(ot-ids-verum)ではCalderaをコンテナとして常設しておらず、
+    # abilities/adversariesの資産のみを保有していた。
+    cap_add: []
+    sysctls: []
+
   attacker-external:
     # 境界外の攻撃者。前身(ot-ids-verum)での該当例: external_attacker
     cap_add: [NET_ADMIN, NET_RAW]

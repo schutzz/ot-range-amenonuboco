@@ -35,6 +35,7 @@ _ROLE_COLORS: dict[str, str] = {
     "observer": "#4a9c9c",
     "structurer": "#5fb3d9",  # Phase3決定事項#41で追加したロール
     "eval-harness": "#8a7a4a",
+    "attack-engine": "#d94a6a",  # Phase4決定事項#58で追加したロール
     "attacker-external": "#b33f3f",
     "attacker-internal": "#b3703f",
     "attacker-insider": "#9c4a9c",
@@ -57,19 +58,24 @@ _OBSERVED_BORDER_COLOR = "#4fd1c5"
 _BLIND_BORDER_COLOR = "#d97757"
 _MIRROR_SINK_BORDER_COLOR = "#a78bfa"
 _MIRROR_FLOW_COLOR = "#4fd1c5"
+# 検知プラグインが載っている資産を囲む角マーカーの色
+_DETECTION_MARK_COLOR = "#e0b341"
 
-_VIEW_W = 1100
-_VIEW_H = 800
+_VIEW_W = 1240
+_VIEW_H = 920
 _CENTER = (_VIEW_W / 2, _VIEW_H / 2 + 20)
-_SEGMENT_RADIUS = 300
-_SEGMENT_BOX_W = 250
-# 観測状態バッジを箱の下端に置くぶん、Phase1の140から拡げている
-_SEGMENT_BOX_H = 152
-_ASSET_COLS = 3
-_ASSET_COL_GAP = 78
+_SEGMENT_RADIUS = 350
+_SEGMENT_BOX_W = 290
+# 観測状態バッジを箱の下端に置くぶん拡げている。2列3行(検知基盤が集中する
+# cc_lanは6資産に達する)でも最終行のラベルがバッジに重ならない高さにする。
+_SEGMENT_BOX_H = 190
+# 3列だと資産ラベル(最長19文字)が横に重なるため2列にした(罠ログ#016)。
+# 列間隔はラベル幅(9px×19文字≒110px)より広く取り、隣の列と重ねない。
+_ASSET_COLS = 2
+_ASSET_COL_GAP = 138
 # 行間はラベル(ノード中心+22px)より広く取る。Phase1の30pxでは次の行の
-# ノードが前の行のラベルに重なった(実際にスクリーンショットで発覚)。
-_ASSET_ROW_GAP = 38
+# ノードが前の行のラベルに重なった(罠ログ#015)。
+_ASSET_ROW_GAP = 40
 _NODE_R = 9
 
 
@@ -106,6 +112,21 @@ def _coverage(manifest: Manifest) -> tuple[set[str], str | None]:
         return set(), None
     observed = {seg.name for seg in inst.observed_segments(manifest.topology)}
     return observed, inst.mirror_to
+
+
+def _plugins_on(manifest: Manifest, asset_name: str) -> list[str]:
+    """指定資産に載る検知プラグイン名の一覧(観測判定と同じく、図側で判定
+    ロジックを再実装せず Detection.plugins_for_host に委ねる、決定事項#50)。
+    """
+    if manifest.detection is None:
+        return []
+    return [p.name for p in manifest.detection.plugins_for_host(asset_name)]
+
+
+def _is_caldera_host(manifest: Manifest, asset_name: str) -> bool:
+    if manifest.attack is None:
+        return False
+    return manifest.attack.caldera_host() == asset_name
 
 
 def _segment_border(seg_name: str, observed: set[str], mirror_to: str | None) -> tuple[str, float]:
@@ -145,10 +166,10 @@ def _mirror_flow_lines(
         dx, dy = mx - sx, my - sy
         dist = math.hypot(dx, dy) or 1.0
         ux, uy = dx / dist, dy / dist
-        # 箱の外側で始まり、外側で終わるよう寄せる(半幅125/半高76より少し外)。
+        # 箱の外側で始まり、外側で終わるよう寄せる(半幅145/半高95より少し外)。
         # 内側に入り込むと、矢印の先端が箱の中の資産ノードと重なって読めなくなる。
-        x1, y1 = sx + ux * 132, sy + uy * 84
-        x2, y2 = mx - ux * 132, my - uy * 84
+        x1, y1 = sx + ux * 152, sy + uy * 104
+        x2, y2 = mx - ux * 152, my - uy * 104
         lines.append(
             f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
             f'class="mirror-flow" marker-end="url(#mirror-arrow)">'
@@ -168,6 +189,10 @@ def _layer_note(manifest: Manifest) -> str:
         layers.append("観測カバレッジ")
     if manifest.structuring is not None:
         layers.append("構造化")
+    if manifest.detection is not None and manifest.detection.plugins:
+        layers.append("検知配置")
+    if manifest.attack is not None and manifest.attack.caldera_host() is not None:
+        layers.append("攻撃エンジン")
     return " / ".join(layers)
 
 
@@ -212,6 +237,20 @@ def _info_panel_html(manifest: Manifest, observed: set[str], mirror_to: str | No
         blocks.append(
             '<div class="info-block">'
             f'<div class="info-title">構造化（{_esc(structuring.engine)}）</div>'
+            f"{rows}"
+            "</div>"
+        )
+
+    detection = manifest.detection
+    if detection is not None and detection.plugins:
+        rows = "".join(
+            f'<div class="info-row"><span>{_esc(p.name)}</span>'
+            f"<code>{_esc(p.host)}</code></div>"
+            for p in detection.plugins
+        )
+        blocks.append(
+            '<div class="info-block">'
+            '<div class="info-title">検知プラグイン（→ ホスト）</div>'
             f"{rows}"
             "</div>"
         )
@@ -327,15 +366,32 @@ def render_network_diagram(manifest: Manifest) -> str:
             )
             if protos:
                 title += f"\n構造化: {protos}"
+        hosted_plugins = _plugins_on(manifest, asset.name)
+        if hosted_plugins:
+            title += "\n検知: " + ", ".join(hosted_plugins)
+        if _is_caldera_host(manifest, asset.name):
+            title += "\n攻撃エンジン: Caldera"
         multihomed_ring = (
             f'<circle cx="{ax:.1f}" cy="{ay:.1f}" r="{_NODE_R + 4}" fill="none" '
             f'stroke="{color}" stroke-width="1.5" opacity="0.5" />'
             if len(seg_names) > 1
             else ""
         )
+        # 検知プラグインが載っている資産には、角ばったマーカーを重ねて
+        # 「ここで検知が動いている」ことを図上で明示する(観測カバレッジの
+        # バッジと同じ思想: 情報を持つノードは一目で分かるようにする)。
+        detection_mark = (
+            f'<rect x="{ax - _NODE_R - 5:.1f}" y="{ay - _NODE_R - 5:.1f}" '
+            f'width="{2 * (_NODE_R + 5)}" height="{2 * (_NODE_R + 5)}" rx="3" '
+            f'fill="none" stroke="{_DETECTION_MARK_COLOR}" stroke-width="1.5" '
+            f'stroke-dasharray="3 2" />'
+            if hosted_plugins
+            else ""
+        )
         svg_parts.append(
             f'<g class="asset-node">'
             f"{multihomed_ring}"
+            f"{detection_mark}"
             f'<circle cx="{ax:.1f}" cy="{ay:.1f}" r="{_NODE_R}" fill="{color}" '
             f'stroke="#0d1117" stroke-width="1.5">'
             f"<title>{_esc(title)}</title>"
@@ -364,6 +420,13 @@ def render_network_diagram(manifest: Manifest) -> str:
             "</span>ミラー集約先</div>"
             f'<div class="legend-item"><span class="bar" style="background:{_BLIND_BORDER_COLOR}">'
             "</span>観測外（死角）</div>"
+        )
+
+    if manifest.detection is not None and manifest.detection.plugins:
+        legend_items += (
+            '<div class="legend-sep"></div>'
+            f'<div class="legend-item"><span class="box" style="border-color:{_DETECTION_MARK_COLOR}">'
+            "</span>検知プラグイン搭載</div>"
         )
 
     info_panel = _info_panel_html(manifest, observed, mirror_to)
@@ -410,7 +473,7 @@ def render_network_diagram(manifest: Manifest) -> str:
   .seg-label {{ fill: var(--text); font-size: 13px; font-weight: 600; }}
   .seg-sub {{ fill: var(--muted); font-size: 10px; }}
   .seg-badge {{ font-size: 10px; font-weight: 600; }}
-  .asset-label {{ fill: var(--text); font-size: 10px; }}
+  .asset-label {{ fill: var(--text); font-size: 9px; }}
   .spoke {{ stroke: #4a5568; stroke-width: 1.2; opacity: 0.6; }}
   .mirror-flow {{
     stroke: {_MIRROR_FLOW_COLOR};
@@ -465,6 +528,7 @@ def render_network_diagram(manifest: Manifest) -> str:
   .legend-item {{ display: flex; align-items: center; gap: 6px; margin: 3px 0; }}
   .dot {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; }}
   .bar {{ width: 10px; height: 3px; border-radius: 2px; display: inline-block; }}
+  .box {{ width: 9px; height: 9px; border: 1.5px dashed; border-radius: 2px; display: inline-block; }}
   .legend-sep {{ height: 1px; background: var(--border); margin: 7px 0; }}
 </style>
 </head>

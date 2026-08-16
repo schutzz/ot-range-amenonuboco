@@ -118,6 +118,31 @@ topology:
         - { segment: mirror_link, ip: 10.1.99.60 }
         - { segment: cc_lan,      ip: 10.1.10.60 }
 
+    - name: killchain_detector
+      # Phase4: 検知プラグイン(Signal6キルチェーン相関)を載せるホスト資産。
+      # 前身ot-ids-verumのkillchain_eql_pollerと同じく、Elasticsearchを
+      # EQLでポーリングして_bulkへ書き戻すだけなので、cc_lan単独接続でよい
+      # (パケット観測に依存しない=ミラーリングの境界越え制約の影響を受けない、
+      # Phase4完了条件1で最初の実証対象に選んだ理由)。
+      role: detection-infra
+      image: python:3.11-slim
+      networks:
+        - { segment: cc_lan, ip: 10.1.10.80 }
+
+    - name: caldera_server
+      # Phase4: 攻撃エミュレーションエンジン(Caldera server)。攻撃層は
+      # engine.caldera.hostでこの資産を名前参照する(決定事項#53の一元化)。
+      role: attack-engine
+      image: python:3.11-slim
+      networks:
+        - { segment: cc_lan, ip: 10.1.10.70 }
+      overrides:
+        # Phase4検証では実際のCalderaイメージは起動せず、外部Ability/Adversaryの
+        # マウントと配線が成立することの確認に留める(実際のCalderaサーバー起動は
+        # イメージが重く、Phase4のスコープ=差し込み口の実証には過剰)。マウント
+        # された資産を確認して常駐する軽量な代替コマンドで実証する。
+        command: "ls -la /app/caldera_assets/abilities /app/caldera_assets/adversaries && tail -f /dev/null"
+
 instrumentation:
   # Phase2決定事項#28: オプトアウト方式。exclude:[]なので、topology.segments
   # の全セグメント(mirror_link自身を除く)が自動的に観測対象になる。
@@ -132,3 +157,28 @@ structuring:
   engine: tshark
   protocols:
     - { name: http, output_index: ot-logs-http-* }
+
+detection:
+  # Phase4: 前身ot-ids-verumのSignal6(キルチェーン相関)を、環境定義に一切
+  # 手を入れずに「1シナリオ」として差し込む(Phase4完了条件1)。プラグイン本体
+  # (source)はマニフェスト外のシナリオ資産であり、プラットフォームは中身を
+  # 一切解釈しない(Phase0決定事項#1)。
+  plugins:
+    - name: signal-6-killchain
+      type: sidecar                 # Phase4はsidecarのみ実装(決定事項#55)
+      host: killchain_detector      # topology.assetsの資産を名前参照(決定事項#54)
+      source: ../scenarios/legacy-power-grid-signals/killchain_eql_poller.py
+      requires: [ requests ]        # 生のpip installは書かない(決定事項#56)
+      config:                       # 環境変数として注入される(決定事項#57)
+        ES_URL: http://elasticsearch:9200
+  evaluation_harness:
+    enabled: false                  # Phase4では口のみ(決定事項#59)
+
+attack:
+  # Phase4: Caldera統合の最低ライン(Phase0決定事項#3)。engine.caldera自体が
+  # 任意であり、宣言が無ければ攻撃関連の生成は一切行われない(決定事項#58)。
+  engine:
+    caldera:
+      host: caldera_server          # topology.assetsのattack-engine資産を参照
+      abilities_path: ../attack-assets/caldera/abilities
+      adversaries_path: ../attack-assets/caldera/adversaries

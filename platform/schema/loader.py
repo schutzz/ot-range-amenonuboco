@@ -28,6 +28,12 @@ def load_manifest(path: str | Path) -> Manifest:
         raise ManifestLoadError(f"manifest {p} did not parse to a mapping (got {type(raw).__name__})")
 
     try:
-        return Manifest.model_validate(raw)
+        manifest = Manifest.model_validate(raw)
     except ValidationError as exc:
         raise ManifestLoadError(f"manifest {p} failed validation:\n{exc}") from exc
+
+    # マニフェスト内の相対パス(外部資産への参照)の解決基点を記録する。
+    # 相対パスは「マニフェストからの相対」として書けるのが自然であり、
+    # プロビジョナを実行したカレントディレクトリに依存させない(決定事項#60)。
+    manifest.source_dir = p.resolve().parent
+    return manifest
