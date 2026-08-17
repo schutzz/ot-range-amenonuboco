@@ -1,4 +1,4 @@
-# Amenonuboco — Cyber Range as a Code
+# Amenonuboco — Cyber Range as Code
 
 ![status](https://img.shields.io/badge/status-Phase%205.5%20(Hardening)-brightgreen)
 
@@ -6,7 +6,7 @@
 
 ## これは何か
 
-Infrastructure as Code がインフラ構成をコードで宣言してべき等に再現するように、**Amenonuboco は「サイバーレンジそのもの」を宣言的なマニフェストで定義し、そこから動的に環境を立ち上げる**ことを目指すプロジェクトです。このアプローチを **Cyber Range as a Code (CRaaC)** と呼びます。
+Infrastructure as Code がインフラ構成をコードで宣言してべき等に再現するように、**Amenonuboco は「サイバーレンジそのもの」を宣言的なマニフェストで定義し、そこから動的に環境を立ち上げる**ことを目指すプロジェクトです。このアプローチを **Cyber Range as Code (CRaC)** と呼びます。
 
 日本神話で、天沼矛は混沌とした海原をかき混ぜて最初の島を生み出しました。「未定義の状態を、一本の矛（マニフェスト）でかき混ぜると、そこから具体的な検証環境が立ち上がる」——この由来が、プロジェクトの本質を表しています。
 
