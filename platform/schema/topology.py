@@ -302,6 +302,20 @@ class Manifest(BaseModel):
                     "instrumentation.mirror_to を宣言してください"
                 )
 
+            # 構造化パイプラインの実行主体は structurer ロールの資産(決定事項#41)。
+            # generators/compose.py は structurer ロール以外の資産に対して黙って
+            # 空のコマンド列を返すため、structurer が1つも無いマニフェストは
+            # 「protocolsを宣言したのにtsharkが1つも起動しない」状態になる。
+            # これは決定事項#76(structuring単独宣言の禁止)と同型の
+            # 「宣言したのに静かに動かない」であり、同じく宣言時に弾く
+            # (Phase9決定事項#127の前提整備)。
+            if not any(a.role == "structurer" for a in self.topology.assets):
+                raise ValueError(
+                    "structuring層(protocols)を宣言するには role: structurer の"
+                    "資産が最低1つ必要です(構造化パイプラインの実行主体が無いと、"
+                    "宣言しても tshark が1つも起動しません)"
+                )
+
         return self
 
 
