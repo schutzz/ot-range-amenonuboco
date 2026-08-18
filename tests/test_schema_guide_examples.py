@@ -22,16 +22,17 @@ def guide_text(repo_root):
     return (repo_root / "docs" / "manifest-schema-guide.md").read_text(encoding="utf-8")
 
 
-def _extract_section_8_yaml(guide_text: str) -> str:
-    section = guide_text.split("## 8. 完全な例")[1].split("## 9.")[0]
+def _extract_complete_example_yaml(guide_text: str) -> str:
+    """§9(Phase6で#8可視化層挿入により#8→#9へ繰り下げ)の完全な例を抽出する。"""
+    section = guide_text.split("## 9. 完全な例")[1].split("## 10.")[0]
     blocks = re.findall(r"```yaml\n(.*?)```", section, re.S)
-    assert blocks, "§8 完全な例に yaml ブロックが見つからない"
+    assert blocks, "§9 完全な例に yaml ブロックが見つからない"
     return blocks[0]
 
 
 def test_complete_example_is_valid(guide_text):
-    """§8 完全な例が、実際のManifestバリデータを通ること。"""
-    raw = yaml.safe_load(_extract_section_8_yaml(guide_text))
+    """§9 完全な例が、実際のManifestバリデータを通ること。"""
+    raw = yaml.safe_load(_extract_complete_example_yaml(guide_text))
     Manifest.model_validate(raw)
 
 

@@ -73,6 +73,13 @@ roles:
     cap_add: []
     sysctls: []
 
+  visualization-engine:
+    # 可視化エンジン(Grafana等)(Phase6決定事項#83)。attack-engineと同じく
+    # 管理UI(ダッシュボード)を提供するアプリ本体を持つイメージを前提とする
+    # ため追加capabilityは持たせない。前身(ot-ids-verum)での該当例: grafana。
+    cap_add: []
+    sysctls: []
+
   attacker-external:
     # 境界外の攻撃者。前身(ot-ids-verum)での該当例: external_attacker
     cap_add: [NET_ADMIN, NET_RAW]

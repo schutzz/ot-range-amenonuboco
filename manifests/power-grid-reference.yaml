@@ -178,6 +178,14 @@ topology:
         # された資産を確認して常駐する軽量な代替コマンドで実証する。
         command: "ls -la /app/caldera_assets/abilities /app/caldera_assets/adversaries && tail -f /dev/null"
 
+    - name: grafana_server
+      # Phase6: 可視化エンジン(Grafana)。visualization.hostでこの資産を名前
+      # 参照する(決定事項#83、attack.engine.caldera.hostと同じ一元化パターン)。
+      role: visualization-engine
+      image: grafana/grafana:11.1.0
+      networks:
+        - { segment: cc_lan, ip: 10.1.10.72 }
+
 instrumentation:
   # Phase2決定事項#28: オプトアウト方式。exclude:[]なので、topology.segments
   # の全セグメント(mirror_link自身を除く)が自動的に観測対象になる。
@@ -234,3 +242,13 @@ attack:
       host: caldera_server          # topology.assetsのattack-engine資産を参照
       abilities_path: ../attack-assets/caldera/abilities
       adversaries_path: ../attack-assets/caldera/adversaries
+
+visualization:
+  # Phase6: Signal1(ゾーン逸脱)のアラートを時系列ダッシュボードで可視化する。
+  # datasourcesは省略し自動生成に任せる(決定事項#81): structuring.protocols[].
+  # output_index(ot-logs-http-*, ot-logs-dnp3-*)と ot-signals-* 規約
+  # (決定事項#86)を束ねた1つのElasticsearchデータソースになる。
+  engine: grafana
+  host: grafana_server           # topology.assetsのvisualization-engine資産を参照
+  dashboards:
+    - ../scenarios/legacy-power-grid-signals/dashboards/signal1_zone.json

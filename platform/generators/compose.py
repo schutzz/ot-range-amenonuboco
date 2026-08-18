@@ -45,6 +45,11 @@ from .structuring import (
     StructuringGenerationError,
     generate_structuring_commands,
 )
+from .visualization import (
+    ComposeServiceOverlay,
+    VisualizationGenerationError,
+    visualization_overlay_for_asset,
+)
 
 
 class ComposeGenerationError(Exception):
@@ -114,15 +119,18 @@ def _assemble_command(
     app_command: str | None,
     plugin_cmds: list[str] | None = None,
     agent_cmds: list[str] | None = None,
+    visualization_cmds: list[str] | None = None,
 ) -> str | None:
     """各層のコマンド列を1本のshellコマンドに合成する。
 
     実行順序: ミラーリング → ルーティング → アプリ起動 → 構造化パイプライン →
-    検知プラグイン → agent。構造化・検知プラグインは末尾が`wait`
-    (バックグラウンドプロセスの終了を無期限に待つ)で終わるため、これらより
+    検知プラグイン → agent → 可視化エンジン。構造化・検知プラグインは末尾が
+    `wait`(バックグラウンドプロセスの終了を無期限に待つ)で終わるため、これらより
     後ろのコマンドには到達しなくなる。この「末尾ブロッキング」系を後方に
     まとめて置く(Phase2決定事項#31 → Phase3決定事項#45 → Phase4で検知プラグイン・
-    agentを追加)。
+    agentを追加 → Phase6で可視化エンジンを追加)。Grafanaは通常command不要
+    (ベースイメージのENTRYPOINTで起動)のため実際には常に空だが、将来のAPI型
+    可視化エンジン(初期化スクリプトを`command`で起動時に叩く形)向けに口を残す。
 
     **自前の起動コマンドを持つ資産にのみ適用する**(呼び出し元 _service_block が
     各cmds の算出自体をこの条件で制御する)。何も無ければNoneを返し、イメージ
@@ -134,8 +142,15 @@ def _assemble_command(
     """
     plugin_cmds = plugin_cmds or []
     agent_cmds = agent_cmds or []
+    visualization_cmds = visualization_cmds or []
 
-    if not app_command and not structuring_cmds and not plugin_cmds and not agent_cmds:
+    if (
+        not app_command
+        and not structuring_cmds
+        and not plugin_cmds
+        and not agent_cmds
+        and not visualization_cmds
+    ):
         return None
 
     parts: list[str] = []
@@ -148,6 +163,7 @@ def _assemble_command(
     parts.extend(structuring_cmds)
     parts.extend(plugin_cmds)
     parts.extend(agent_cmds)
+    parts.extend(visualization_cmds)
 
     joined = " && ".join(parts)
     # Docker Compose自体が command 文字列中の $VAR / $(...) を「Composeの変数
@@ -237,6 +253,7 @@ def _service_block(
     asset: Asset,
     manifest: Manifest,
     presets: RolePresets,
+    visualization_overlay: ComposeServiceOverlay | None,
 ) -> dict[str, Any]:
     topology = manifest.topology
     instrumentation = manifest.instrumentation
@@ -268,18 +285,29 @@ def _service_block(
     if sysctls:
         service["sysctls"] = sysctls
 
-    if resolved.ports:
-        service["ports"] = resolved.ports
+    # ports は overrides 由来 + 可視化エンジンの配線(Phase6、例: Grafanaの
+    # 3000:3000)を結合する。可視化エンジンのポートはユーザーが上書きする
+    # 動機が薄い(エンジン自身の管理UIポート)ため、overrides側との衝突検査は
+    # せず単純に追記する。
+    ports = list(resolved.ports)
+    if visualization_overlay is not None:
+        ports.extend(visualization_overlay.ports)
+    if ports:
+        service["ports"] = ports
 
-    # 環境変数は、overrides由来(Phase3)と検知プラグインのconfig由来(Phase4
-    # 決定事項#57)を結合する。同じキーで衝突した場合はプラグイン側の意図が
-    # 壊れる可能性があるため、overrides側を優先しつつ検出したら残す
-    # (プラグインのconfig同士の衝突は plugin_environment 側で既に検査済み)。
+    # 環境変数は、overrides由来(Phase3)・検知プラグインのconfig由来(Phase4
+    # 決定事項#57)・可視化エンジン由来(Phase6)を結合する。同じキーで衝突した
+    # 場合はoverrides側を優先しつつ検出したら残す(プラグインのconfig同士の
+    # 衝突は plugin_environment 側で既に検査済み)。
     env_list = list(resolved.environment)
     override_keys = {e.split("=", 1)[0] for e in env_list}
     for entry in _detection_env_for_asset(detection, asset.name):
         if entry.split("=", 1)[0] not in override_keys:
             env_list.append(entry)
+    if visualization_overlay is not None:
+        for entry in visualization_overlay.environment:
+            if entry.split("=", 1)[0] not in override_keys:
+                env_list.append(entry)
     if env_list:
         service["environment"] = env_list
 
@@ -305,9 +333,16 @@ def _service_block(
     agent_cmds = (
         generate_agent_commands(attack, asset.name) if attack is not None else []
     )
+    # 可視化エンジンのcommand(Phase6)。Grafanaは通常None(ベースイメージの
+    # ENTRYPOINTで起動)だが、将来のAPI型エンジン向けに口を残す(決定事項#87)。
+    visualization_cmds = (
+        [visualization_overlay.command]
+        if visualization_overlay is not None and visualization_overlay.command
+        else []
+    )
     has_own_startup = bool(resolved.command) or bool(structuring_cmds) or bool(
         plugin_cmds
-    ) or bool(agent_cmds)
+    ) or bool(agent_cmds) or bool(visualization_cmds)
 
     # ルーティング・ミラーリングは、①自前の起動コマンドを持ち、かつ②実際に
     # NET_ADMINを保持している資産にのみ算出する。NET_ADMINが無いと`ip route
@@ -327,6 +362,7 @@ def _service_block(
         resolved.command,
         plugin_cmds,
         agent_cmds,
+        visualization_cmds,
     )
     if command:
         service["command"] = command
@@ -343,11 +379,27 @@ def _service_block(
         # 検知プラグイン本体を読み取り専用でマウントする(Phase4、決定事項#46と
         # 同じ絶対パス方式)。
         volumes.extend(plugin_volume_mounts(manifest, detection, asset.name))
+    if visualization_overlay is not None:
+        # ダッシュボードJSON(シナリオ資産、決定事項#82)の読み取り専用マウント。
+        # datasource等の生成物は volumes ではなく configs で運ぶ(決定事項#84、
+        # 下記のconfigs展開を参照)。
+        volumes.extend(visualization_overlay.volumes)
     if attack is not None:
         # Caldera serverのAbility/Adversaryを読み取り専用でマウントする(Phase4)。
         volumes.extend(caldera_volume_mounts(manifest, attack, asset.name))
     if volumes:
         service.setdefault("volumes", []).extend(volumes)
+
+    if visualization_overlay is not None and visualization_overlay.configs:
+        # Docker Composeの`configs`(トップレベル要素)への参照(決定事項#84)。
+        # 生成内容そのもの(GeneratedConfig.content)はcompose全体のトップレベル
+        # `configs`セクションへ、generate_compose側でグローバルにユニークな
+        # 名前(資産名をprefixに付与)で登録する。ここではサービス側の参照
+        # (source/target)だけを組み立てる。
+        service["configs"] = [
+            {"source": f"{asset.name}_{local_name}", "target": cfg.target}
+            for local_name, cfg in visualization_overlay.configs.items()
+        ]
 
     service["restart"] = "unless-stopped"
     return service
@@ -359,18 +411,39 @@ def generate_compose(manifest: Manifest, presets: RolePresets) -> dict[str, Any]
     """
     topology = manifest.topology
     try:
-        return {
+        services: dict[str, Any] = {}
+        top_level_configs: dict[str, Any] = {}
+
+        for asset in topology.assets:
+            overlay = visualization_overlay_for_asset(
+                manifest, manifest.visualization, asset
+            )
+            services[asset.name] = _service_block(asset, manifest, presets, overlay)
+            if overlay is not None:
+                for local_name, cfg in overlay.configs.items():
+                    # `configs`はDocker Compose全体で共有される名前空間の
+                    # トップレベル要素であり、資産をまたいで衝突しないよう
+                    # 資産名をprefixに付与してグローバルにユニーク化する
+                    # (決定事項#84)。天沼矛の生成器はこの時点までファイルI/O
+                    # を一切行っておらず、辞書として組み立てるだけの純粋関数
+                    # のままである。
+                    top_level_configs[f"{asset.name}_{local_name}"] = {
+                        "content": cfg.content
+                    }
+
+        result: dict[str, Any] = {
             "networks": _network_block(topology.segments),
-            "services": {
-                asset.name: _service_block(asset, manifest, presets)
-                for asset in topology.assets
-            },
+            "services": services,
         }
+        if top_level_configs:
+            result["configs"] = top_level_configs
+        return result
     except (
         MirroringGenerationError,
         StructuringGenerationError,
         PluginGenerationError,
         AttackGenerationError,
+        VisualizationGenerationError,
     ) as exc:
         raise ComposeGenerationError(str(exc)) from exc
 

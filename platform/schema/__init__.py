@@ -23,6 +23,7 @@ from .topology import (
     SegmentKind,
     Topology,
 )
+from .visualization import Visualization, VisualizationDatasource
 
 __all__ = [
     "Asset",
@@ -50,6 +51,8 @@ __all__ = [
     "Structuring",
     "StructuringException",
     "Topology",
+    "Visualization",
+    "VisualizationDatasource",
     "load_manifest",
     "load_role_presets",
     "resolve_effective_attributes",

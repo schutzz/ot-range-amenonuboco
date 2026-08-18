@@ -8,7 +8,7 @@
 
 ## 0. 前提：マニフェストが宣言する範囲としない範囲
 
-Amenonuboco のマニフェストは、サイバーレンジを5つの層で宣言します。設計の核は、層によって**宣言の深さを意図的に変えている**ことです。
+Amenonuboco のマニフェストは、サイバーレンジを6つの層で宣言します。設計の核は、層によって**宣言の深さを意図的に変えている**ことです。
 
 | 層 | キー | 宣言の深さ |
 |---|---|---|
@@ -17,8 +17,9 @@ Amenonuboco のマニフェストは、サイバーレンジを5つの層で宣�
 | ③ 構造化 | `structuring` | **何をどう構造化するかを宣言**（既定はtshark） |
 | ④ 検知 | `detection` | **差し込み口だけ宣言**（ロジック本体はマニフェスト外） |
 | ⑤ 攻撃 | `attack` | **実行環境だけ宣言**（攻撃の中身はマニフェスト外） |
+| ⑥ 可視化 | `visualization` | **配線だけ宣言**（ダッシュボードの中身はマニフェスト外） |
 
-**なぜ④⑤は「口」だけなのか**：環境（①〜③）は有限の構成要素の組み合わせなので、宣言的に固めればべき等に再現できます。一方、検知ロジックと攻撃は無限に多様で、環境の細部にも依存します。これらをマニフェストに固定してしまうと、環境を変えるたびに検知と攻撃を作り直す「終わらない旅」に入ります。だから④⑤は「載せる口」だけを用意し、中身はシナリオ側・実行時の自由に委ねます。
+**なぜ④⑤⑥は「口」だけなのか**：環境（①〜③）は有限の構成要素の組み合わせなので、宣言的に固めればべき等に再現できます。一方、検知ロジック・攻撃・ダッシュボードは無限に多様で、環境の細部にも依存します。これらをマニフェストに固定してしまうと、環境を変えるたびに作り直す「終わらない旅」に入ります。だから④⑤⑥は「載せる口」だけを用意し、中身はシナリオ側・実行時の自由に委ねます（⑥の詳細は§8）。
 
 ---
 
@@ -51,6 +52,11 @@ detection:         # ④ 検知ロジックの差し込み口
 attack:            # ⑤ 攻撃の実行環境（攻撃者ノードは topology.assets 側に置く）
   engine: {...}
   agents: [...]
+
+visualization:     # ⑥ 可視化エンジンへの配線（ダッシュボード本体はマニフェスト外）
+  engine: grafana
+  host: ...
+  dashboards: [...]
 ```
 
 ---
@@ -256,10 +262,11 @@ structuring:
 |---|---|---|
 | `ot-asset` | 被害者となりうるOT資産（PLC/RTU/HMI/IED/SCADAマスター） | cc_scada_master, sub_b_rtu_hmi, sub_b_plc_01, sub_a_ied_01 |
 | `l3-router` | セグメント間ルータ（`ip_forward` 有効） | wan_router |
-| `detection-infra` | 検知基盤（取り込み・保存・可視化・検知 sidecar） | vector, elasticsearch, grafana, 各 sidecar |
+| `detection-infra` | 検知基盤（取り込み・保存・検知 sidecar） | vector, elasticsearch, 各 sidecar |
 | `observer` | 観測ノード（生パケットをそのまま確認する用途、tcpdump 等） | zeek_tap, suricata_ids |
 | `structurer` | 構造化パイプライン実行ノード（tshark ＋ バルクローダー、§4） | （前身では Vector＋Zeek が担っていた役割） |
 | `attack-engine` | 攻撃エミュレーションエンジン（Caldera server、§7） | （前身では常設せず Ability/Adversary 資産のみ保有） |
+| `visualization-engine` | 可視化エンジン（Grafana server 等、§8） | grafana |
 | `eval-harness` | 正解ラベル源（評価専用、§6参照） | oob_redis, oob_webdis |
 | `attacker-external` | 境界外の攻撃者 | external_attacker |
 | `attacker-internal` | 内部に置いた踏み台攻撃者 | red-team |
@@ -359,9 +366,50 @@ attack:
 
 ---
 
-## 8. 完全な例（前身環境のスライスを1枚で）
+## 8. ⑥ 可視化層（`visualization`）
 
-5層すべて、マルチホーム、IP動的割当、tshark例外、Caldera を1枚に含む最小例です。実ファイルは [`manifests/power-grid-reference.yaml`](../manifests/power-grid-reference.yaml)（トポロジ層のみ、Phase 1時点）にあります。
+ダッシュボードの**中身（パネル定義・クエリ）はマニフェストに書きません**。ここで宣言するのは「どの可視化エンジンを、どの資産に立て、どのダッシュボードJSONを載せるか」という配線だけです。ネットワーク図（構造の可視化、プラットフォーム組み込み）とは別レイヤーで、こちらは時系列データ（検知アラート・トラフィック統計）の可視化を担います。
+
+```yaml
+topology:
+  assets:
+    - name: grafana_server
+      role: visualization-engine
+      image: grafana/grafana:11.1.0
+      networks:
+        - { segment: cc_lan, ip: 10.0.10.72 }
+
+visualization:
+  engine: grafana                 # 現在は grafana のみ実装
+  host: grafana_server            # topology.assets の visualization-engine 資産を指す
+  dashboards:
+    - ../scenarios/legacy-power-grid-signals/dashboards/signal1_zone.json
+  # datasources は省略可能（下記参照）
+```
+
+| フィールド | 必須 | 説明 |
+|---|---|---|
+| `engine` | ✕ | 可視化エンジンの種類（既定・現状唯一の実装は `grafana`） |
+| `host` | ✅ | 可視化エンジンを実行する資産の名前（**`topology.assets` に実在し、`visualization-engine` ロールを持つこと**） |
+| `dashboards` | ✕ | ダッシュボード定義（JSON）の**外部パス**の列挙（マニフェスト外資産を読み取り専用でマウントするだけ、`detection.plugins[].source` と同じ扱い） |
+| `datasources` | ✕ | データソースの明示指定。省略時は `structuring.protocols[].output_index` と検知アラートの命名規約 `ot-signals-<signal>-*` から自動生成される（下記） |
+| `elasticsearch_url` | ✕ | 投入先 Elasticsearch の URL（既定 `http://elasticsearch:9200`） |
+
+> **なぜ `host` で資産を指すのか**：§6・§7 と同じ理由です。コンテナを宣言する場所は `topology.assets` の1箇所に統一し、可視化層は「そこに何を配線するか」だけを担います。
+
+> **データソースは自動生成されるのが既定**：`structuring` で宣言した構造化ログの index（`ot-logs-<protocol>-*`）と、検知アラートの命名規約（`ot-signals-<signal>-*`）を束ねた1つの Elasticsearch データソースが自動生成されます。マニフェストに構造化プロトコルを1つ足すだけで、可視化側にも自動で反映されます（単一の宣言から複数の出力が生まれる、ネットワーク図と同じ思想）。細かく制御したい場合のみ `datasources` を明示してください。
+
+> **検知プラグインは、アラートの index 名を `ot-signals-<signal>-*` に揃えること**：構造化ログの命名規約 `ot-logs-<protocol>-*` と対になる規約です。自動生成されるデータソースはこの規約に依存するため、検知プラグイン側でこの規約から外れた index 名を使うと、可視化層から見えなくなります。
+
+> **可視化エンジンも任意です**：`visualization` 層も、宣言しなければ可視化関連の生成は一切行われません。ダッシュボードを使わない運用や、手元で別途 Grafana を立てる運用も、追加の宣言なしで成立します。
+
+> **将来の拡張**：`engine` は現状 `grafana` のみですが、生成側は抽象化されています（`VisualizationEngine`）。将来、API 型のエンジン（Kibana 等）を追加する際も、この抽象に実装を足すだけで済み、マニフェストの語彙自体は変わりません。
+
+---
+
+## 9. 完全な例（前身環境のスライスを1枚で）
+
+6層すべて、マルチホーム、IP動的割当、tshark例外、Caldera、可視化を1枚に含む最小例です。実ファイルは [`manifests/power-grid-reference.yaml`](../manifests/power-grid-reference.yaml)（Phase 6時点で全層を含む）にあります。
 
 > 命名注記：`metadata.name` はドメイン（電力網ラボ）を表す名前とし、前身プロジェクト名を識別子として名乗りません。Amenonuboco のリポジトリ内で前身の名前がファイル名・識別子に出ると、閲覧者がどちらのプロジェクトの資産か混同しうるためです。
 
@@ -437,6 +485,11 @@ topology:
         - { segment: cc_lan, ip: 10.0.10.70 }
       overrides:
         ports: [ "8888:8888" ]
+    - name: grafana_server
+      role: visualization-engine
+      image: grafana/grafana:11.1.0
+      networks:
+        - { segment: cc_lan, ip: 10.0.10.72 }
 
 instrumentation:
   mirror_to: mirror_link
@@ -471,13 +524,21 @@ attack:
       adversaries_path: ../attack-assets/caldera/adversaries
   agents:
     - { host: sub_a_ied_02, type: sandcat }
+
+visualization:
+  # 可視化エンジン(grafana_server)は上の topology.assets 側に宣言済み。
+  # ここでは載せるダッシュボードだけを書く。datasourcesは省略(自動生成)。
+  engine: grafana
+  host: grafana_server
+  dashboards:
+    - ../scenarios/legacy-power-grid-signals/dashboards/signal1_zone.json
 ```
 
-このマニフェスト1枚から、プロビジョナが「動く環境」を、レンダラが「防御側・統裁側向けHTMLネットワーク図」を生成します。図はこのマニフェストから機械生成されるため、定義を変えれば図も変わり、実態との乖離が生じません。
+このマニフェスト1枚から、プロビジョナが「動く環境」を、レンダラが「防御側・統裁側向けHTMLネットワーク図」を、可視化エンジンが「時系列ダッシュボード」を生成します。図・ダッシュボードのいずれもこのマニフェストから機械生成・配線されるため、定義を変えれば両方が追随し、実態との乖離が生じません。
 
 ---
 
-## 9. まだ決まっていないこと（Phase 1以降で確定）
+## 10. まだ決まっていないこと（Phase 1以降で確定）
 
 α版時点で未確定・要検証の項目です。
 

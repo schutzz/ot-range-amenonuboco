@@ -79,7 +79,13 @@ def poll_and_write():
                 # Phase11 Do#4(決定事項#61への対応): related_ips(vector.toml側の各parse_*transformと同じ意図)
                 "related_ips": list({pivot_ip, attacker_ip} - {"unknown"}),
             }
-            index_name = time.strftime("ot-logs-killchain-%Y.%m.%d", time.gmtime())
+            # 天沼矛(Amenonuboco)への移植時の規約統一(Phase6決定事項#86):
+            # 検知アラートは ot-signals-<signal>-* に揃える(構造化ログの
+            # ot-logs-<protocol>-* と対になる命名)。前身ot-ids-verumでは
+            # ot-logs-killchain-* だったが、天沼矛では「構造化ログ」と
+            # 「検知結果」を命名で区別する。可視化層(Phase6)のdatasource自動
+            # 生成が、この規約に基づいて ot-signals-* を検知アラートとして拾う。
+            index_name = time.strftime("ot-signals-killchain-%Y.%m.%d", time.gmtime())
             bulk_lines.append(json.dumps({"index": {"_index": index_name}}))
             bulk_lines.append(json.dumps(doc))
 

@@ -1,0 +1,104 @@
+{
+  "title": "Signal 1: Zone Violation Detection",
+  "uid": "signal1-zone-violation",
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Zone Violation Alerts (ot-signals-zone-violation-*)",
+      "description": "Signal 1(ゾーン逸脱)のアラート発火数の推移。datasourceフィールドは意図的に省略しており、Grafanaの既定データソース(天沼矛が自動生成するElasticsearch datasource)へフォールバックする(プラットフォームは中身を解釈しない、決定事項#82)。",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "query": "signal.keyword:\"signal-1-zone-violation\"",
+          "timeField": "@timestamp",
+          "metrics": [{ "id": "1", "type": "count" }],
+          "bucketAggs": [
+            {
+              "id": "2",
+              "type": "date_histogram",
+              "field": "@timestamp",
+              "settings": { "interval": "auto" }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Total Zone Violation Alerts",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 10 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": {
+        "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "signal.keyword:\"signal-1-zone-violation\"",
+          "timeField": "@timestamp",
+          "metrics": [{ "id": "1", "type": "count" }],
+          "bucketAggs": [
+            {
+              "id": "2",
+              "type": "date_histogram",
+              "field": "@timestamp",
+              "settings": { "interval": "auto" }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "Recent Zone Violation Alerts",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": {},
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "_id": true,
+              "_index": true,
+              "_type": true,
+              "highlight": true,
+              "sort": true,
+              "source_dnp3_doc_id": true,
+              "allowed_sources": true
+            },
+            "indexByName": {
+              "@timestamp": 0,
+              "signal": 1,
+              "src_ip": 2,
+              "dst_ip": 3
+            },
+            "renameByName": {}
+          }
+        }
+      ],
+      "targets": [
+        {
+          "refId": "A",
+          "query": "signal.keyword:\"signal-1-zone-violation\"",
+          "timeField": "@timestamp",
+          "metrics": [{ "id": "1", "type": "raw_data" }],
+          "bucketAggs": []
+        }
+      ]
+    }
+  ]
+}

@@ -52,6 +52,22 @@ def _alert_index() -> str:
     return f"{ALERT_INDEX_BASE}-{today}"
 
 
+def _to_iso8601(tshark_timestamp: str | None) -> str:
+    """tshark -T ek が出力する epoch millis文字列("1786889321633"のような
+    値)を、ElasticsearchがdateとしてマッピングするISO8601形式へ変換する。
+    変換できない場合は現在時刻にフォールバックする(監視ノードを止めない)。
+    """
+    if tshark_timestamp is not None:
+        try:
+            epoch_ms = int(tshark_timestamp)
+            return datetime.datetime.fromtimestamp(
+                epoch_ms / 1000, tz=datetime.timezone.utc
+            ).isoformat()
+        except (TypeError, ValueError):
+            pass
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
 def poll_once() -> int:
     """新規に到着したDNP3パケットを走査し、ゾーン逸脱を検知したらESへ書き出す。
     戻り値: 今回発火した検知件数。
@@ -98,6 +114,16 @@ def poll_once() -> int:
             bulk_lines.append(
                 json.dumps(
                     {
+                        # Phase6実装時に発見(罠ログ#089相当): 元のtshark由来
+                        # "timestamp"はepoch millisの文字列であり、Elasticsearch
+                        # の動的マッピングでtext型になる(罠#019と同型)ため、
+                        # Grafana等の時系列パネルが時間軸として認識できない。
+                        # Elasticsearchが標準で日付型と推定するISO8601形式の
+                        # "@timestamp"を追加する(killchain_eql_poller.pyは
+                        # 前身から移植した時点で既に@timestampを持っていた
+                        # ため、この欠落はzone_violation.py新規実装時のみの
+                        # 抜けだった)。
+                        "@timestamp": _to_iso8601(hit["_source"].get("timestamp")),
                         "timestamp": hit["_source"].get("timestamp"),
                         "signal": "signal-1-zone-violation",
                         "src_ip": src_ip,

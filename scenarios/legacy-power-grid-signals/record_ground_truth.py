@@ -31,8 +31,13 @@ import urllib.request
 def record(es_url: str, src_ip: str, dst_ip: str, expected_violation: bool) -> None:
     today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y.%m.%d")
     index = f"signal1-ground-truth-{today}"
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     doc = {
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        # Elasticsearchの標準タイムスタンプフィールド名に揃える
+        # (Phase6実装時にzone_violation.pyで発見した抜けと同じ理由、
+        # Grafana等の時系列可視化がこのフィールド名を前提にするため)。
+        "@timestamp": now_iso,
+        "timestamp": now_iso,
         "src_ip": src_ip,
         "dst_ip": dst_ip,
         "expected_violation": expected_violation,

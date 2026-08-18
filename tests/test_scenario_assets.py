@@ -52,6 +52,49 @@ def test_dnp3_frame_structure(dnp3_attack):
     assert frame[0:2] == b"\x05\x64"
 
 
+# --- --repeat/--interval(Phase6決定事項#88、デモ用データ蓄積) --------------
+
+
+def test_main_default_repeat_is_single_shot(dnp3_attack, monkeypatch):
+    """--repeat省略時は従来通り1回のみ送信されること(後方互換)。"""
+    calls: list[tuple[str, int, int]] = []
+    monkeypatch.setattr(
+        dnp3_attack,
+        "send_dnp3",
+        lambda target_ip, target_port, function_code: calls.append(
+            (target_ip, target_port, function_code)
+        )
+        or "10.1.20.11",
+    )
+    monkeypatch.setattr(sys, "argv", ["dnp3_zone_attack.py", "--target-ip", "10.1.10.10"])
+    assert dnp3_attack.main() == 0
+    assert len(calls) == 1
+
+
+def test_main_repeat_sends_n_times(dnp3_attack, monkeypatch):
+    """--repeat Nで、送信がちょうどN回行われること(決定事項#88)。"""
+    calls: list[tuple[str, int, int]] = []
+    monkeypatch.setattr(
+        dnp3_attack,
+        "send_dnp3",
+        lambda target_ip, target_port, function_code: calls.append(
+            (target_ip, target_port, function_code)
+        )
+        or "10.1.20.11",
+    )
+    sleeps: list[float] = []
+    monkeypatch.setattr(dnp3_attack.time, "sleep", lambda sec: sleeps.append(sec))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["dnp3_zone_attack.py", "--target-ip", "10.1.10.10", "--repeat", "5", "--interval", "2"],
+    )
+    assert dnp3_attack.main() == 0
+    assert len(calls) == 5
+    # 送信間の間隔のみsleepする(最後の送信後にはsleepしない、無駄な待ちを作らない)。
+    assert sleeps == [2, 2, 2, 2]
+
+
 # --- bulk_loader の index名解決(決定事項#49、罠#012) ------------------------
 
 

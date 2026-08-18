@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import socket
 import sys
+import time
 
 
 def crc_dnp(data: bytes) -> bytes:
@@ -90,12 +91,36 @@ def main() -> int:
     parser.add_argument("--target-ip", default="10.1.10.10", help="cc_scada_masterのIP(既定)")
     parser.add_argument("--target-port", type=int, default=20000)
     parser.add_argument("--function-code", type=int, default=1, help="1=READ")
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        help=(
+            "攻撃フレームの送信回数(既定1回、単発)。Phase6決定事項#88: "
+            "単発では時系列ダッシュボードのスクリーンショットに足る量の"
+            "データ点が得られない(Phase5実装時点で2件のみ)ため、デモ用に"
+            "複数回送信できるようにする。"
+        ),
+    )
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=5.0,
+        help="--repeat指定時、送信間隔(秒)。zone_violation.pyのポーリング周期(5秒)に合わせた既定値。",
+    )
     args = parser.parse_args()
 
-    src_ip = send_dnp3(args.target_ip, args.target_port, args.function_code)
+    src_ip: str | None = None
+    for i in range(args.repeat):
+        src_ip = send_dnp3(args.target_ip, args.target_port, args.function_code)
+        is_last = i == args.repeat - 1
+        if not is_last:
+            time.sleep(args.interval)
+
     # 正解ラベルの記録はこのスクリプトの責務ではない(上記docstring参照)。
     # オペレータが record_ground_truth.py を、cc_lanに接続された評価用ホスト
-    # (eval_harness)から別途実行する。
+    # (eval_harness)から別途実行する。--repeat > 1でも送信元IPは同一ホストの
+    # ままなので、記録は1回で足りる。
     print(
         f"[i] 正解ラベルの記録は record_ground_truth.py --src-ip {src_ip} "
         f"--dst-ip {args.target_ip} --expect-violation で行ってください",

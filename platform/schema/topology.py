@@ -33,6 +33,7 @@ AssetRole = Literal[
     "structurer",  # Phase3決定事項#41: 構造化パイプライン(tshark+バルクローダー)実行ノード
     "eval-harness",
     "attack-engine",  # Phase4決定事項#58: 攻撃エミュレーションエンジン(Caldera server)
+    "visualization-engine",  # Phase6決定事項#83: 可視化エンジン(Grafana等)
     "attacker-external",
     "attacker-internal",
     "attacker-insider",
@@ -240,6 +241,7 @@ class Manifest(BaseModel):
     structuring: Optional["Structuring"] = None
     detection: Optional["Detection"] = None
     attack: Optional["Attack"] = None
+    visualization: Optional["Visualization"] = None
 
     # マニフェスト自身が置かれているディレクトリ(loaderが読み込み時に設定する)。
     # 相対パスで書かれた外部資産参照(detection.plugins[].source、Calderaの
@@ -277,6 +279,11 @@ class Manifest(BaseModel):
 
             validate_attack(self.attack, self.topology)
 
+        if self.visualization is not None:
+            from .visualization import validate_visualization
+
+            validate_visualization(self.visualization, self.topology)
+
         # structuring層はミラーされたトラフィックを構造化する層であり、
         # instrumentation層(ミラーリング)が前提になる。structuringだけを宣言
         # してinstrumentationを宣言しないと、structurer資産の起動コマンドが
@@ -303,5 +310,6 @@ from .attack import Attack  # noqa: E402
 from .detection import Detection  # noqa: E402
 from .instrumentation import Instrumentation  # noqa: E402
 from .structuring import Structuring  # noqa: E402
+from .visualization import Visualization  # noqa: E402
 
 Manifest.model_rebuild()

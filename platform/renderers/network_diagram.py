@@ -36,6 +36,7 @@ _ROLE_COLORS: dict[str, str] = {
     "structurer": "#5fb3d9",  # Phase3決定事項#41で追加したロール
     "eval-harness": "#8a7a4a",
     "attack-engine": "#d94a6a",  # Phase4決定事項#58で追加したロール
+    "visualization-engine": "#e0a63c",  # Phase6決定事項#83で追加したロール
     "attacker-external": "#b33f3f",
     "attacker-internal": "#b3703f",
     "attacker-insider": "#9c4a9c",
@@ -152,6 +153,18 @@ def _is_caldera_host(manifest: Manifest, asset_name: str) -> bool:
     if manifest.attack is None:
         return False
     return manifest.attack.caldera_host() == asset_name
+
+
+def _visualization_host_label(manifest: Manifest, asset_name: str) -> str | None:
+    """指定資産が可視化エンジンのhostであれば、表示用ラベル(例: "Grafana")を
+    返す。判定は Visualization.host の比較のみで、図側でロジックを
+    再実装しない(決定事項#50と同じ方針)。
+    """
+    if manifest.visualization is None:
+        return None
+    if manifest.visualization.host != asset_name:
+        return None
+    return manifest.visualization.engine.capitalize()
 
 
 def _segment_border(seg_name: str, observed: set[str], mirror_to: str | None) -> tuple[str, float]:
@@ -286,6 +299,21 @@ def _info_panel_html(manifest: Manifest, observed: set[str], mirror_to: str | No
             "</div>"
         )
 
+    visualization = manifest.visualization
+    if visualization is not None:
+        rows = f'<div class="info-row"><span>ホスト</span><code>{_esc(visualization.host)}</code></div>'
+        if visualization.dashboards:
+            rows += (
+                f'<div class="info-row"><span>ダッシュボード</span>'
+                f"<code>{len(visualization.dashboards)} 件</code></div>"
+            )
+        blocks.append(
+            '<div class="info-block">'
+            f'<div class="info-title">可視化（{_esc(visualization.engine)}）</div>'
+            f"{rows}"
+            "</div>"
+        )
+
     if not blocks:
         return ""
     return f'<div class="info-panel">{"".join(blocks)}</div>'
@@ -404,6 +432,9 @@ def render_network_diagram(manifest: Manifest) -> str:
             title += "\n検知: " + ", ".join(hosted_plugins)
         if _is_caldera_host(manifest, asset.name):
             title += "\n攻撃エンジン: Caldera"
+        viz_label = _visualization_host_label(manifest, asset.name)
+        if viz_label is not None:
+            title += f"\n可視化エンジン: {viz_label}"
         multihomed_ring = (
             f'<circle cx="{ax:.1f}" cy="{ay:.1f}" r="{_NODE_R + 4}" fill="none" '
             f'stroke="{color}" stroke-width="1.5" opacity="0.5" />'

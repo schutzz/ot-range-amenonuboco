@@ -1,6 +1,6 @@
 # Amenonuboco — Cyber Range as Code
 
-![status](https://img.shields.io/badge/status-Phase%205.5%20(Hardening)-brightgreen)
+![status](https://img.shields.io/badge/status-Phase%206%20(Visualization)-brightgreen)
 
 > **天沼矛（あめのぬぼこ）** — マニフェスト1枚から、OT/ICS向けサイバーレンジ（攻撃対象 + 計装 + 検知パイプライン）を動的にプロビジョニングするためのプラットフォーム。
 
@@ -39,9 +39,9 @@ ot-range-amenonuboco/
 
 ## 現在のテスト品
 
-マニフェスト1枚（[`manifests/power-grid-reference.yaml`](./manifests/power-grid-reference.yaml)、前身 `ot-ids-verum` の電力網ラボのトポロジを再現したリファレンススライス）から、下記2つを生成できます。
+マニフェスト1枚（[`manifests/power-grid-reference.yaml`](./manifests/power-grid-reference.yaml)、前身 `ot-ids-verum` の電力網ラボのトポロジを再現したリファレンススライス）から、下記3つを生成・配線できます。
 
-1. `docker-compose.yml` — 実際に `docker compose up` で13コンテナが起動し、マルチホーム資産（ゲートウェイ）を経由したクロスセグメントルーティングが機能することを実機確認済みです。マニフェストに `instrumentation` 層（観測対象セグメントの宣言、既定で全セグメントが対象になるオプトアウト方式）を加えるだけで、ゲートウェイ資産が `tc` ベースのミラーリングを自動設定し、複数セグメントを跨ぐ通信が観測ノードへ実際に届くことも実機確認済みです（送出側・受信側双方のカーネルカウンタで検証）。さらに `structuring` 層を加えると、専用ロール（`structurer`）の資産が tshark ベースの構造化パイプラインを自動起動し、ミラーされたトラフィックを Elasticsearch へバルク投入します。実際にセグメントを跨ぐ HTTP/DNP3 トラフィックを捕捉し、`ot-logs-<protocol>-*` へ書き込まれ検索可能になることまで実機確認済みです。そして `detection`／`attack` 層を加えると、検知プラグイン（sidecar）を任意の資産へ載せ、Caldera エンジンを配線します。**前身 `ot-ids-verum` の検知シナリオ（Signal 1: ゾーン逸脱検知）を、環境定義に一切手を入れずに差し込み、攻撃 → 構造化 → 検知発火 → 正解ラベルとの一致まで、縦に1本通しきることを実機で確認しました**（不正セグメントからのDNP3送信 → tsharkによる構造化 → sidecarでのアラート発火 → 独立した評価ハーネスでの正解ラベル照合、一致率100%）。
+1. `docker-compose.yml` — 実際に `docker compose up` で14コンテナが起動し、マルチホーム資産（ゲートウェイ）を経由したクロスセグメントルーティングが機能することを実機確認済みです。マニフェストに `instrumentation` 層（観測対象セグメントの宣言、既定で全セグメントが対象になるオプトアウト方式）を加えるだけで、ゲートウェイ資産が `tc` ベースのミラーリングを自動設定し、複数セグメントを跨ぐ通信が観測ノードへ実際に届くことも実機確認済みです（送出側・受信側双方のカーネルカウンタで検証）。さらに `structuring` 層を加えると、専用ロール（`structurer`）の資産が tshark ベースの構造化パイプラインを自動起動し、ミラーされたトラフィックを Elasticsearch へバルク投入します。実際にセグメントを跨ぐ HTTP/DNP3 トラフィックを捕捉し、`ot-logs-<protocol>-*` へ書き込まれ検索可能になることまで実機確認済みです。そして `detection`／`attack` 層を加えると、検知プラグイン（sidecar）を任意の資産へ載せ、Caldera エンジンを配線します。**前身 `ot-ids-verum` の検知シナリオ（Signal 1: ゾーン逸脱検知）を、環境定義に一切手を入れずに差し込み、攻撃 → 構造化 → 検知発火 → 正解ラベルとの一致まで、縦に1本通しきることを実機で確認しました**（不正セグメントからのDNP3送信 → tsharkによる構造化 → sidecarでのアラート発火 → 独立した評価ハーネスでの正解ラベル照合、一致率100%）。
 2. 防御側・統裁側向けのHTMLネットワーク図（外部ライブラリ非依存の自己完結ファイル、ズーム/パン・ノードホバーでの詳細表示に対応）：
 
 ![Amenonubocoが生成したネットワーク図の例](./docs/images/network-diagram-preview.png)
@@ -50,21 +50,27 @@ ot-range-amenonuboco/
 
 - **トポロジ** — セグメントを円周上の箱として配置し、複数セグメントに接続する資産（ゲートウェイ `wan_router`、構造化ノード `log_structurer`）は接続先の重心に置いてスポーク線を伸ばします。
 - **観測カバレッジ** — 各セグメントの枠色と下端バッジが「観測対象／ミラー集約先／**観測外（死角）**」を示します。破線の矢印は、実際にミラーされるトラフィックの流れです。**どこが死角かを一目で示すこと**を重視しています（演習の統裁側にとっては、見えている範囲より見えていない範囲の方が重要なため）。
-- **構造化・検知** — どのプロトコルがどの Elasticsearch index へ構造化されるか、どの検知プラグインがどの資産に載っているかを左パネルに表示します。検知プラグインを載せた資産には破線の角枠、攻撃エンジン（Caldera）には専用色を付けます。
+- **構造化・検知・可視化** — どのプロトコルがどの Elasticsearch index へ構造化されるか、どの検知プラグイン・可視化エンジンがどの資産に載っているかを左パネルに表示します。検知プラグインを載せた資産には破線の角枠、攻撃エンジン（Caldera）・可視化エンジン（Grafana）には専用色を付けます。
 
 観測カバレッジ・検知配置の判定は図側で再実装せず、プロビジョナと同じロジックをそのまま呼んでいます。図と実環境が別々の答えを出す余地を作らないためです。
+
+3. Grafana ダッシュボード（時系列データの可視化。ネットワーク図が「構造」を可視化するのに対し、こちらは「検知結果・トラフィック統計」を可視化する別レイヤーです）：
+
+![Amenonubocoが配線したGrafanaダッシュボードの例](./docs/images/grafana-dashboard-preview.png)
+
+`visualization` 層は、Grafana server を `topology.assets` へ通常の資産として宣言し、`visualization.host` で名前参照するだけで配線が完成します。データソース（Elasticsearch）は `structuring.protocols[].output_index` と検知アラートの命名規約（`ot-signals-<signal>-*`）から**自動生成**され、ダッシュボード定義（JSON）はマニフェスト外のシナリオ資産として読み取り専用マウントされます（プラットフォームは中身を解釈しません、検知プラグインの `source` と同じ扱い）。上のスクリーンショットは、Signal 1（ゾーン逸脱検知）に対する反復攻撃（15回）で蓄積したアラートを、Grafana が実際にプロビジョニングし描画したものを headless Chrome で撮影したものです（13件のアラート発火をタイムライン上に確認できます）。
 
 再現する場合：
 
 ```bash
 cd platform
-python cli.py provision ../manifests/power-grid-reference.yaml   # docker-compose.yml を生成
+python cli.py provision ../manifests/power-grid-reference.yaml   # docker-compose.yml を生成(Grafanaの配線を含む)
 python cli.py diagram   ../manifests/power-grid-reference.yaml   # ネットワーク図(HTML)を生成
 ```
 
 ## ステータス
 
-**Phase 5（完全再現デモ）＋ 地盤固め完了** — トポロジ層〜検知・攻撃層の差し込み口（Phase 1〜4）に加え、前身 `ot-ids-verum` の検知シナリオ「Signal 1: ゾーン逸脱検知」を、**攻撃 → 構造化 → 検知発火 → 正解ラベル一致まで縦に1本通しきりました**。マニフェストの宣言だけで生成される部分と、ユーザーが持ち込む3本のシナリオスクリプト（検知ロジック・攻撃・評価）の境界を、実データで示せる状態です。あわせて、スキーマ・生成物・シナリオ資産をカバーする pytest スイート（35テスト）と GitHub Actions CI を整備しました。次は Phase 6（可視化層 ── Grafana 等ダッシュボードの配線）に着手予定です。
+**Phase 6（可視化層）完了** — トポロジ層〜検知・攻撃層の差し込み口（Phase 1〜4）、前身 `ot-ids-verum` の検知シナリオ「Signal 1: ゾーン逸脱検知」の縦通し（Phase 5）に加え、**検知結果を時系列ダッシュボード（Grafana）へ可視化する差し込み口**を実装しました。可視化エンジンはネットワーク図と同じく「配線はプラットフォーム、中身（ダッシュボードJSON）はシナリオ資産」という設計で、将来的な複数エンジン対応（Kibana 等）に備えた抽象インターフェース（`VisualizationEngine`）の上に Grafana を第1実装として載せています。マニフェストの宣言だけで生成される部分と、ユーザーが持ち込むシナリオ資産（検知ロジック・攻撃・評価・ダッシュボード定義）の境界を、実データで示せる状態です。あわせて、スキーマ・生成物・シナリオ資産をカバーする pytest スイート（54テスト）と GitHub Actions CI を整備しました。次は Phase 7（重要インフラ15種の器展開）に着手予定です。
 
 ### 開発
 
