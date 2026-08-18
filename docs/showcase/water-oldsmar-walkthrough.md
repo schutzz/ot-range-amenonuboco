@@ -28,9 +28,9 @@
 構造化（log_structurerのtsharkが実際のRFBハンドシェイク全体
         （Server/Client protocol version → Security types → Authentication →
         Server framebuffer parameters → Client set encodings → Client key event）
-        を ot-logs-vnc-* へ投入。211件のドキュメント、うち18件が
-        vnc.key_down=true のキー入力イベントとして記録され、
-        入力した"11100"の文字コード（'1'=49, '0'=48）まで抽出できた）
+        を ot-logs-vnc-* へ投入。攻撃の各ラウンドごとに vnc.key_down=true の
+        キー入力イベントが記録され、入力した"11100"の文字コード
+        （'1'=49, '0'=48）まで抽出できる）
 ```
 
 構造化されたキーイベントの実データ（Elasticsearchから抜粋）：
