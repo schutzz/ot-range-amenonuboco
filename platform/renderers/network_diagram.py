@@ -40,6 +40,8 @@ _ROLE_COLORS: dict[str, str] = {
     "attacker-external": "#b33f3f",
     "attacker-internal": "#b3703f",
     "attacker-insider": "#9c4a9c",
+    "security-asset": "#3ca6a6",  # Phase7決定事項#104
+    "remote-access-gateway": "#c9a13c",  # Phase7決定事項#105、侵害の起点になりうる踏み台として警戒色寄りに
 }
 
 # セグメント種別ごとの背景色(薄いティント、docs/manifest-schema-guide.md §5.1に対応)
@@ -50,6 +52,7 @@ _SEGMENT_KIND_COLORS: dict[str, str] = {
     "ot-l2": "rgba(74,156,156,0.16)",
     "observation": "rgba(122,90,158,0.16)",
     "dmz": "rgba(150,150,60,0.14)",
+    "security-lan": "rgba(60,166,166,0.16)",  # Phase7決定事項#104
 }
 
 _SEGMENT_BORDER_COLOR = "#5a6a7a"
@@ -64,7 +67,6 @@ _DETECTION_MARK_COLOR = "#e0b341"
 
 _VIEW_W = 1240
 _VIEW_H = 920
-_CENTER = (_VIEW_W / 2, _VIEW_H / 2 + 20)
 _SEGMENT_RADIUS = 350
 _SEGMENT_BOX_W = 290
 # 観測状態バッジを箱の下端に置くぶん拡げている。2列3行(検知基盤が集中する
@@ -84,14 +86,65 @@ def _esc(s: str) -> str:
     return html.escape(str(s), quote=True)
 
 
-def _segment_positions(segments: list[Segment]) -> dict[str, tuple[float, float]]:
+def _required_segment_radius(
+    segments: list[Segment], box_heights: dict[str, float]
+) -> float:
+    """セグメント数・各箱の高さに応じて、隣接する箱同士が重ならないために
+    必要な円周半径を動的に算出する。
+
+    箱は円に沿って回転させず軸並行の矩形のまま配置するため、正確な非重複
+    条件は角度ごとに異なる。ここでは各箱の半対角線(バウンディング半径)の
+    最大値を「隣接2箱の中心間の弦の長さがこれの2倍+余白を上回れば、
+    どの向きでもまず重ならない」という保守的な近似に使う(セグメント数が
+    増える・資産数の偏りで特定の箱だけ縦に伸びる、の両方に対応するため。
+    固定半径のままだとセグメント数7以上・資産偏在時に箱同士が重なった、
+    Phase7の電力濃縮で発覚した不具合)。
+    """
+    n = len(segments)
+    if n <= 1:
+        return _SEGMENT_RADIUS
+    max_half_diag = max(
+        math.hypot(_SEGMENT_BOX_W, box_heights[s.name]) / 2 for s in segments
+    )
+    margin = 30.0
+    chord_needed = 2 * max_half_diag + margin
+    angle_step = 2 * math.pi / n
+    required = chord_needed / (2 * math.sin(angle_step / 2))
+    return max(_SEGMENT_RADIUS, required)
+
+
+def _canvas_geometry(
+    segments: list[Segment], box_heights: dict[str, float]
+) -> tuple[float, float, tuple[float, float], float]:
+    """(view_w, view_h, center, radius) を返す。半径をセグメント数・箱サイズに
+    応じて広げた場合、ビューポート自体もそれに追従して拡げる(そうしないと
+    外周のセグメント箱がSVGの外へはみ出す)。既定サイズ(1240x920)を下回る
+    ことはない(小規模トポロジの見た目は従来どおり)。
+    """
+    radius = _required_segment_radius(segments, box_heights)
+    max_half_diag = max(
+        (math.hypot(_SEGMENT_BOX_W, box_heights[s.name]) / 2 for s in segments),
+        default=0.0,
+    )
+    pad = 60.0
+    needed_w = 2 * (radius + max_half_diag) + 2 * pad
+    needed_h = 2 * (radius + max_half_diag) + 2 * pad
+    view_w = max(_VIEW_W, needed_w)
+    view_h = max(_VIEW_H, needed_h)
+    center = (view_w / 2, view_h / 2 + 20)
+    return view_w, view_h, center, radius
+
+
+def _segment_positions(
+    segments: list[Segment], center: tuple[float, float], radius: float
+) -> dict[str, tuple[float, float]]:
     """各セグメント箱の中心座標を円周上に配置して返す。"""
     n = len(segments)
     positions: dict[str, tuple[float, float]] = {}
     for i, seg in enumerate(segments):
         angle = (2 * math.pi * i / n) - (math.pi / 2) if n > 0 else 0.0
-        cx = _CENTER[0] + _SEGMENT_RADIUS * math.cos(angle)
-        cy = _CENTER[1] + _SEGMENT_RADIUS * math.sin(angle)
+        cx = center[0] + radius * math.cos(angle)
+        cy = center[1] + radius * math.sin(angle)
         positions[seg.name] = (cx, cy)
     return positions
 
@@ -321,8 +374,9 @@ def _info_panel_html(manifest: Manifest, observed: set[str], mirror_to: str | No
 
 def render_network_diagram(manifest: Manifest) -> str:
     topology: Topology = manifest.topology
-    seg_pos = _segment_positions(topology.segments)
     seg_heights = _segment_box_heights(topology)
+    view_w, view_h, center, radius = _canvas_geometry(topology.segments, seg_heights)
+    seg_pos = _segment_positions(topology.segments, center, radius)
     observed, mirror_to = _coverage(manifest)
 
     svg_parts: list[str] = []
@@ -395,7 +449,7 @@ def render_network_diagram(manifest: Manifest) -> str:
         if xs and ys:
             asset_positions[asset.name] = (sum(xs) / len(xs), sum(ys) / len(ys))
         else:
-            asset_positions[asset.name] = _CENTER
+            asset_positions[asset.name] = center
 
     # --- マルチホーム資産→各セグメント箱へのスポーク線(資産ノードより先に描画) ---
     for asset in topology.assets:
@@ -788,7 +842,7 @@ def render_network_diagram(manifest: Manifest) -> str:
   </div>
 </header>
 <div id="canvas-wrap">
-  <svg id="diagram" viewBox="0 0 {_VIEW_W} {_VIEW_H}"
+  <svg id="diagram" viewBox="0 0 {view_w:.0f} {view_h:.0f}"
        preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <marker id="mirror-arrow" viewBox="0 0 10 10" refX="9" refY="5"

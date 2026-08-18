@@ -1,0 +1,172 @@
+# 天沼矛(Amenonuboco) Phase7 Stage4: 上下水道分野のリファレンススライス。
+# Phase7-draft-DeepDive-Water.md の設計に基づく。主軸実演はOldsmar浄水場事件
+# 型(2021年、正規リモートアクセス経路の悪用によるプロセス値改竄相当)。
+# electric(power-grid-reference.yaml)と同型のパターン(トポロジ・計装・構造化)
+# を踏襲しつつ、水道分野固有の要素(remote-access-gatewayロール・dmzセグメント)
+# を実際に使う最初のケースとなる(決定事項#104・#105)。
+apiVersion: amenonuboco/v1alpha1
+kind: CyberRange
+metadata:
+  name: water-utility-reference
+  description: 上下水道分野のリファレンススライス。Oldsmar浄水場事件型(正規リモートアクセス経路の悪用)を主軸実演とする
+
+topology:
+  segments:
+    - { name: wtp_cc_lan,          cidr: 10.2.10.0/24,  kind: it-core }
+    - { name: wan_link,            cidr: 172.19.0.0/24, kind: wan-edge }
+    - { name: pump_station_a_lan,  cidr: 10.2.20.0/24,  kind: ot-lan }
+    - { name: pump_station_b_lan,  cidr: 10.2.30.0/24,  kind: ot-lan }
+    - { name: remote_access_dmz,   cidr: 10.2.40.0/24,  kind: dmz }
+    - { name: mirror_link,         cidr: 10.2.99.0/24,  kind: observation }
+  routing:
+    gateway: wan_router
+  assets:
+    - name: wan_router
+      role: l3-router
+      image: debian:bullseye-slim
+      networks:
+        - { segment: wtp_cc_lan,         ip: 10.2.10.254 }
+        - { segment: wan_link,           ip: 172.19.0.254 }
+        - { segment: pump_station_a_lan, ip: 10.2.20.254 }
+        - { segment: pump_station_b_lan, ip: 10.2.30.254 }
+        - { segment: remote_access_dmz,  ip: 10.2.40.254 }
+        - { segment: mirror_link,        ip: 10.2.99.254 }
+
+    - name: wtp_scada_master
+      # 中央浄水場のSCADA/historian。プロセス値集約の中枢だが、本実演では
+      # トポロジ上の存在証明のみ(実プロトコル実装は対象外、電力のhistorianと
+      # 同型の最小リスナー)。
+      role: ot-asset
+      image: python:3.10-slim
+      networks:
+        - { segment: wtp_cc_lan, ip: 10.2.10.10 }
+      overrides:
+        command: "( python3 -m http.server 8080 & wait )"
+
+    - name: pump_a_plc
+      # ポンプ場AのPLC(Aliquippa型シナリオ用、補助・比較材料。
+      # Phase7-draft-DeepDive-Water.md §4の案A)。Modbus/TCP既定ポート502の
+      # 最小リスナー(実Modbusサーバ実装は対象外、電力のcc_scada_masterと同型)。
+      role: ot-asset
+      image: python:3.10-slim
+      networks:
+        - { segment: pump_station_a_lan, ip: 10.2.20.10 }
+      overrides:
+        command: "( python3 -m http.server 502 & wait )"
+
+    - name: pump_b_hmi
+      # ポンプ場BのHMI。Oldsmar型主軸実演の標的。Xvfb(仮想フレームバッファ)+
+      # x11vnc(実VNCサーバ、パスワード無し=Oldsmar事件の「単一パスワード共有・
+      # 実質認証無し」を再現)を実際に起動する。検知は`remote_access_gateway`側
+      # で行う(決定事項#110、下記コメント参照)。
+      role: ot-asset
+      image: debian:bullseye-slim
+      networks:
+        - { segment: pump_station_b_lan, ip: 10.2.30.10 }
+      overrides:
+        command: |
+          apt-get update -qq && apt-get install -y -qq xvfb x11vnc xterm >/dev/null 2>&1 &&
+          ( Xvfb :1 -screen 0 800x600x16 &
+            sleep 2
+            DISPLAY=:1 xterm -fa Monospace -fs 16 -e sh -c 'echo NaOH_SETPOINT_PPM=100 normal; sleep 100000' &
+            sleep 1
+            x11vnc -display :1 -nopw -forever -shared -rfbport 5900 -bg -o /var/log/x11vnc.log &&
+            wait
+          )
+
+    - name: remote_access_gateway
+      # Oldsmar型の要: 正規のリモート保守経路(侵害の起点になりうる、決定事項#105)。
+      # アプリ層のリレー(socat)としてremote_access_dmz:5900をpump_b_hmi:5900へ
+      # 中継する(IP転送権限は持たせない、roles.yaml参照)。
+      # 検知は当初pump_b_hmi側で「送信元ベース」に行う設計だったが、socatの
+      # リレーはpump_b_hmiから見て常にgateway自身のIP(pump_station_b_lan側)を
+      # 送信元とするため、送信元ベースの検知はpump_b_hmi側では原理的に機能
+      # しないと実機検証で判明した(決定事項#110)。**リモート保守経路そのもの
+      # (gateway)が「境界を越えるセッションの唯一の観測点」**であるという
+      # Oldsmar事件の教訓(不十分なセグメンテーション・監視されていないリモート
+      # アクセス経路)によりよく合致するため、DMZ側(remote_access_dmz)の受け口
+      # で確立したセッションをすべて記録する方式に変更した。当初`ss`による
+      # ポーリング(3秒間隔)で検知しようとしたが、`vncdo`の接続が数秒未満で
+      # 完了・切断するため、ポーリングの間隔に収まらず検知漏れが発生することが
+      # 実機検証で判明した(決定事項#111)。socat自身のデバッグログ
+      # (`-d -d -lf`)はセッション確立をイベント駆動でリアルタイムに記録する
+      # ため、この種の短命な接続でも取りこぼさない。
+      role: remote-access-gateway
+      image: debian:bullseye-slim
+      networks:
+        - { segment: remote_access_dmz,  ip: 10.2.40.11 }
+        - { segment: pump_station_b_lan, ip: 10.2.30.11 }
+      overrides:
+        command: |
+          apt-get update -qq && apt-get install -y -qq socat >/dev/null 2>&1 &&
+          ( socat -d -d -lf /var/log/socat.log TCP-LISTEN:5900,fork,reuseaddr TCP:10.2.30.10:5900 &
+            sleep 2
+            tail -F /var/log/socat.log | while read LINE; do
+              case $LINE in
+                *'accepting connection'*)
+                  echo '[remote_access_gateway] !!! REMOTE ACCESS SESSION VIA DMZ ESTABLISHED (OLDSMAR-TYPE CHANNEL) !!!' ;;
+              esac
+            done
+            wait
+          )
+
+    - name: attacker_external
+      # Aliquippa型(pump_a_plcへの直接接続)・Oldsmar型(remote_access_gateway
+      # 経由)どちらの起点にもなる(Phase7-draft-DeepDive-Water.md §2.2)。
+      # wan_link(外部境界相当、電力のups_attackerと同じ配置)に置く。
+      # 当初はremote_access_dmzに直接置いていたが、gatewayと同一セグメントの
+      # L2直結トラフィックはwan_router経由の観測(tcミラーリング、決定事項#30)
+      # の対象にならず構造化パイプラインで一切捕捉できないと実機検証で判明した
+      # (決定事項#112)。wan_linkに配置しwan_router越しにgatewayへ到達させる
+      # 構成に変更することで、実際にインターネット越しに到達する攻撃者という
+      # より正確なCISA注意喚起のモデル化にもなった。
+      role: attacker-external
+      image: python:3.10-slim
+      networks:
+        - { segment: wan_link, ip: 172.19.0.50 }
+      overrides:
+        command: |
+          apt-get update -qq && apt-get install -y -qq gcc python3-dev >/dev/null 2>&1 &&
+          pip install --quiet vncdotool >/dev/null 2>&1 &&
+          ( for i in 1 2 3 4 5; do
+              sleep 15
+              vncdo -s 10.2.40.11::5900 -v -t 10 type '11100' 2>&1
+            done
+            wait
+          )
+
+    - name: elasticsearch
+      role: detection-infra
+      image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+      networks:
+        - { segment: wtp_cc_lan, ip: 10.2.10.40 }
+      overrides:
+        environment:
+          - "discovery.type=single-node"
+          - "xpack.security.enabled=false"
+          - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+
+    - name: tap_observer
+      role: observer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link }
+      overrides:
+        command: "apt-get update -qq && apt-get install -y -qq tcpdump >/dev/null 2>&1 && tcpdump -i eth0 -nn"
+
+    - name: log_structurer
+      role: structurer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link,  ip: 10.2.99.60 }
+        - { segment: wtp_cc_lan,   ip: 10.2.10.60 }
+
+instrumentation:
+  mirror_to: mirror_link
+  exclude: []
+
+structuring:
+  engine: tshark
+  protocols:
+    - { name: vnc,    output_index: ot-logs-vnc-*  }  # Oldsmar型主軸実演。決定事項#101(vnc.key_down==1でのキー抽出)の実証対象
+    - { name: modbus, output_index: ot-logs-modbus-* }  # Aliquippa型(補助)。pump_a_plcは現状プレースホルダのため実トラフィックは無し(電力のopcua同様、将来拡張の宣言)

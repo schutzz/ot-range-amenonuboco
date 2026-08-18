@@ -1,0 +1,158 @@
+# 天沼矛(Amenonuboco) Phase7 Stage5: 重要製造業分野のリファレンススライス。
+# Phase7-draft-DeepDive-Manufacturing.md の設計に基づく。主軸実演は監視カメラ
+# 経由の横展開(物理セキュリティ網からOTフロアへの越境、案B)。警備系
+# (security-lan/security-asset)を実際に使う最初のケース(決定事項#104)。
+# 電力・水道で確立した型(①weak/defaultな経路→②攻撃者資産から模擬アクセス→
+# ③イベント駆動の送信元検知ログ→④tshark構造化で裏付け)を踏襲する。
+apiVersion: amenonuboco/v1alpha1
+kind: CyberRange
+metadata:
+  name: manufacturing-plant-reference
+  description: 重要製造業分野のリファレンススライス。監視カメラ経由の横展開(物理セキュリティ網→OTフロア)を主軸実演とする
+
+topology:
+  segments:
+    - { name: corp_it_lan,           cidr: 10.3.10.0/24, kind: it-core }
+    - { name: mes_dmz,               cidr: 10.3.15.0/24, kind: dmz }
+    - { name: production_line_a_lan, cidr: 10.3.20.0/24, kind: ot-lan }
+    - { name: production_line_b_lan, cidr: 10.3.30.0/24, kind: ot-lan }
+    - { name: physical_security_lan, cidr: 10.3.40.0/24, kind: security-lan }
+    - { name: mirror_link,           cidr: 10.3.99.0/24, kind: observation }
+  routing:
+    gateway: wan_router
+  assets:
+    - name: wan_router
+      role: l3-router
+      image: debian:bullseye-slim
+      networks:
+        - { segment: corp_it_lan,           ip: 10.3.10.254 }
+        - { segment: mes_dmz,               ip: 10.3.15.254 }
+        - { segment: production_line_a_lan, ip: 10.3.20.254 }
+        - { segment: production_line_b_lan, ip: 10.3.30.254 }
+        - { segment: physical_security_lan, ip: 10.3.40.254 }
+        - { segment: mirror_link,           ip: 10.3.99.254 }
+
+    - name: mes_server
+      # MES(製造実行システム)。IT/OT境界(mes_dmz)の要衝。ドイツ製鉄所型
+      # (案A、補助)の境界突破対象になりうるが、本実演では未使用。
+      role: ot-asset
+      image: python:3.10-slim
+      networks:
+        - { segment: mes_dmz, ip: 10.3.15.10 }
+      overrides:
+        command: "( python3 -m http.server 8080 & wait )"
+
+    - name: line_a_plc
+      # 生産ラインAのPLC(EtherNet/IP想定、補助・比較材料)。実プロトコル
+      # 実装は対象外の最小リスナー(電力・水道の同型プレースホルダと同じ)。
+      role: ot-asset
+      image: python:3.10-slim
+      networks:
+        - { segment: production_line_a_lan, ip: 10.3.20.10 }
+      overrides:
+        command: "( python3 -m http.server 44818 & wait )"
+
+    - name: line_b_robot_controller
+      # 生産ラインBのロボットコントローラ。監視カメラ経由横展開の標的。
+      # 実際のEtherNet/IPカプセル化ヘッダ(ListServicesコマンド、24byte)を
+      # 送受信できるsocatリスナー(EtherNet/IP既定ポート44818)。検知は
+      # socatのデバッグログ(イベント駆動、水道の決定事項#111と同型)。
+      role: ot-asset
+      image: debian:bullseye-slim
+      networks:
+        - { segment: production_line_b_lan, ip: 10.3.30.10 }
+      overrides:
+        command: |
+          apt-get update -qq && apt-get install -y -qq socat >/dev/null 2>&1 &&
+          ( socat -d -d -lf /var/log/socat.log TCP-LISTEN:44818,fork,reuseaddr STDOUT &
+            sleep 2
+            tail -F /var/log/socat.log | while read LINE; do
+              case $LINE in
+                *'accepting connection'*)
+                  echo '[line_b_robot_controller] !!! UNEXPECTED CONNECTION FROM PHYSICAL SECURITY SEGMENT DETECTED (LATERAL MOVEMENT) !!!' ;;
+              esac
+            done
+            wait
+          )
+
+    - name: nvr_server
+      # 監視カメラの録画・配信サーバ(ONVIF/RTSP想定)。実プロトコル実装は
+      # 対象外の最小リスナー(電力historianと同型のプレースホルダ)。
+      role: security-asset
+      image: python:3.10-slim
+      networks:
+        - { segment: physical_security_lan, ip: 10.3.40.10 }
+      overrides:
+        command: "( python3 -m http.server 80 & wait )"
+
+    - name: access_control_panel
+      # 入退室管理パネル。実プロトコル実装は対象外の最小リスナー。
+      role: security-asset
+      image: python:3.10-slim
+      networks:
+        - { segment: physical_security_lan, ip: 10.3.40.11 }
+      overrides:
+        command: "( python3 -m http.server 80 & wait )"
+
+    - name: attacker_internal
+      # 監視カメラ網を既に侵害済みという想定の踏み台(物理セキュリティ網から
+      # OTフロアへ横展開する起点)。前身ot-ids-verumのred-teamと同じ
+      # attacker-internalロール(踏み台、NET_ADMIN既定、罠ログ#029対応済み)。
+      role: attacker-internal
+      image: python:3.10-slim
+      networks:
+        - { segment: physical_security_lan, ip: 10.3.40.50 }
+      overrides:
+        # ENIP(EtherNet/IP)カプセル化ヘッダ(ListServices、24byte、決定事項#115)を
+        # base64経由で送る。当初printfの\NNN(8進)/\xHH(16進)エスケープで組み
+        # 立てていたが、Docker Compose自身のcommand文字列パース(shell-word化)
+        # がbackslashエスケープを消費してしまい、コンテナ内に届く頃には
+        # リテラルの"004"等の数字文字列に化けていた(実機検証で発覚、罠ログ#030)。
+        # base64はbackslash・二重引用符を一切使わないため、このパース層の
+        # 曖昧さを構造的に回避できる。
+        # 元データ: 04 00(Command=ListServices) 00 00(Length) 00000000(Session)
+        #           00000000(Status) "PIVOT!!!"(Context) 00000000(Options)
+        command: |
+          apt-get update -qq && apt-get install -y -qq socat >/dev/null 2>&1 &&
+          ( for i in 1 2 3 4 5; do
+              sleep 15
+              echo BAAAAAAAAAAAAAAAUElWT1QhISEAAAAA | base64 -d | socat - TCP:10.3.30.10:44818,connect-timeout=5
+            done
+            wait
+          )
+
+    - name: elasticsearch
+      role: detection-infra
+      image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+      networks:
+        - { segment: corp_it_lan, ip: 10.3.10.40 }
+      overrides:
+        environment:
+          - "discovery.type=single-node"
+          - "xpack.security.enabled=false"
+          - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+
+    - name: tap_observer
+      role: observer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link }
+      overrides:
+        command: "apt-get update -qq && apt-get install -y -qq tcpdump >/dev/null 2>&1 && tcpdump -i eth0 -nn"
+
+    - name: log_structurer
+      role: structurer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link,  ip: 10.3.99.60 }
+        - { segment: corp_it_lan,  ip: 10.3.10.60 }
+
+instrumentation:
+  mirror_to: mirror_link
+  exclude: []
+
+structuring:
+  engine: tshark
+  protocols:
+    - { name: enip, output_index: ot-logs-enip-* }  # 監視カメラ経由横展開の主軸実演対象
+    - { name: http, output_index: ot-logs-http-* }  # mes_server/nvr_server/access_control_panel等のプレースホルダ用(将来拡張の宣言、電力opcuaと同様)

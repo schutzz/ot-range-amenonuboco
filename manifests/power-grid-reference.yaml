@@ -21,6 +21,11 @@ topology:
     - { name: sub_b_lan,    cidr: 10.1.30.0/24,  kind: ot-lan }
     - { name: sub_a_l2_lan, cidr: 10.1.20.0/24,  kind: ot-l2 }
     - { name: mirror_link,  cidr: 10.1.99.0/24,  kind: observation }
+    # Phase7決定事項#106: 電力の濃縮(変電所2→4)。sub_cはsub_bと同型(DNP3系)、
+    # sub_dはsub_aと同型(GOOSE系)の独立変電所として追加する
+    # (Phase7-draft-DeepDive-Power.md §2.1)。
+    - { name: sub_c_lan,    cidr: 10.1.40.0/24,  kind: ot-lan }
+    - { name: sub_d_l2_lan, cidr: 10.1.50.0/24,  kind: ot-l2 }
   routing:
     gateway: wan_router
   assets:
@@ -33,6 +38,8 @@ topology:
         - { segment: sub_b_lan,    ip: 10.1.30.254 }
         - { segment: sub_a_l2_lan, ip: 10.1.20.254 }
         - { segment: mirror_link,  ip: 10.1.99.254 }
+        - { segment: sub_c_lan,    ip: 10.1.40.254 }
+        - { segment: sub_d_l2_lan, ip: 10.1.50.254 }
 
     - name: cc_scada_master
       # Phase 1はトポロジ/ルーティング層のみの等価性検証が目的であり、前身の
@@ -74,6 +81,60 @@ topology:
       image: python:3.10-slim
       networks:
         - { segment: sub_a_l2_lan, ip: 10.1.20.11 }
+      overrides:
+        command: "tail -f /dev/null"
+
+    - name: sub_c_rtu
+      # Phase7決定事項#106: 変電所C(DNP3系、sub_bと同型だが独立資産)のRTU。
+      # cc_scada_masterと同じ最小リスナー構成(tsharkのポートベースDNP3判定
+      # には十分、Phase1-Provisioner.md §3.6と同じ理由)。
+      role: ot-asset
+      image: python:3.10-slim
+      networks:
+        - { segment: sub_c_lan, ip: 10.1.40.10 }
+      overrides:
+        command: "( python3 -m http.server 20000 & wait )"
+
+    - name: sub_c_hmi
+      # 変電所Cの監視員向けHMI。sub_b_rtu_hmiと同型(Node-RED)。1変電所内に
+      # 複数資産を持たせることで、水道・製造業ドラフトの濃さと揃える。
+      role: ot-asset
+      image: nodered/node-red:3.1.0
+      networks:
+        - { segment: sub_c_lan, ip: 10.1.40.11 }
+      overrides:
+        ports: [ "18801:1880" ]
+        command: "/usr/src/node-red/entrypoint.sh"
+
+    - name: ups_attacker
+      # Phase7決定事項#108: cc_upsのSNMP管理インターフェースへの不正アクセスを
+      # 模す。2022年CISA/FBI/DOE注意喚起の「インターネットに露出したUPS管理
+      # インターフェース」を再現するため、wan_link(外部境界相当)に配置する。
+      role: attacker-external
+      image: python:3.10-slim
+      networks:
+        - { segment: wan_link, ip: 172.18.0.50 }
+      overrides:
+        command: |
+          apt-get update -qq && apt-get install -y -qq snmp >/dev/null 2>&1 &&
+          ( for i in 1 2 3 4 5 6; do
+              sleep 15
+              snmpset -v2c -c public -t 5 -r 2 10.1.10.95:161 1.3.6.1.2.1.1.6.0 s 'UNAUTHORIZED_SHUTDOWN_COMMAND_INJECTED' 2>&1
+            done
+            wait
+          )
+
+    - name: sub_d_ied_01
+      # 変電所D(GOOSE系、sub_aと同型)のIED。sub_a_ied_02とは異なり侵害されて
+      # いない正規資産(対照群)。role=ot-assetとし、attacker-insiderは
+      # sub_a_ied_02のみに残す。GOOSE構造化はPhase3決定事項#42の例外ルート
+      # (spicy-sidecar)の対象で、生成ロジック自体は未実装のため、前身
+      # ot-ids-verumのgoose_spicy_sidecar.py資産を手動配線する方式を
+      # 暫定的に採る(決定事項#107、詳細はPhase7-InfraExpansion.md参照)。
+      role: ot-asset
+      image: python:3.10-slim
+      networks:
+        - { segment: sub_d_l2_lan, ip: 10.1.50.11 }
       overrides:
         command: "tail -f /dev/null"
 
@@ -186,6 +247,48 @@ topology:
       networks:
         - { segment: cc_lan, ip: 10.1.10.72 }
 
+    - name: historian
+      # Phase7決定事項#106: 全変電所のプロセス値を集約する歴史データサーバ。
+      # OPC UAでの接続を想定(水道ドラフトのhistorian連携と対になる要素)。
+      # 実際のOPC UAサーバ実装はPhase7の実演スコープでは未着手、ポートの
+      # 存在のみを示す最小リスナー。
+      role: ot-asset
+      image: python:3.10-slim
+      networks:
+        - { segment: cc_lan, ip: 10.1.10.15 }
+      overrides:
+        command: "( python3 -m http.server 4840 & wait )"  # OPC UA既定ポート4840
+
+    - name: cc_ups
+      # Phase7決定事項#106・#97・#108: 中央制御室のUPS(無停電電源装置)。
+      # 実際のnet-snmp(snmpd)をSNMPv2c・community "public"(既定認証情報のまま
+      # 露出、CISA/FBI/DOE 2022年共同注意喚起のモデル)で起動する。検知は
+      # 「localhost以外からのSNMPアクセス自体」を許可リスト方式で見る
+      # (Signal1のzone_violation.py=ALLOWED_DNP3_SOURCESと同じ思想、決定事項#68
+      # 参照)。当初はsysLocationへの書き込み成功を検知条件にしていたが、実機
+      # 検証でこのsnmpdビルドがsysLocoation.0のSET自体をnotWritableで拒否する
+      # ことが判明したため、書き込み成否に依存しないアクセス検知へ設計変更した
+      # (決定事項#109)。
+      role: ot-asset
+      image: python:3.10-slim
+      networks:
+        - { segment: cc_lan, ip: 10.1.10.95 }
+      overrides:
+        command: |
+          apt-get update -qq && apt-get install -y -qq snmpd snmp >/dev/null 2>&1 &&
+          printf 'rwcommunity public\nsysLocation Central Control Room UPS (normal)\n' > /etc/snmp/snmpd.conf &&
+          ( snmpd -f -Lf /var/log/snmpd.log &
+            sleep 3
+            tail -F /var/log/snmpd.log | while read LINE; do
+              case $LINE in
+                *'Connection from UDP'*127.0.0.1*127.0.0.1*) : ;;
+                *'Connection from UDP'*)
+                  echo '[cc_ups] !!! UNAUTHORIZED SNMP ACCESS FROM NON-LOCAL SOURCE DETECTED -- SIMULATING UPS SHUTDOWN (AVAILABILITY LOSS) !!!' ;;
+              esac
+            done
+            wait
+          )
+
 instrumentation:
   # Phase2決定事項#28: オプトアウト方式。exclude:[]なので、topology.segments
   # の全セグメント(mirror_link自身を除く)が自動的に観測対象になる。
@@ -200,7 +303,9 @@ structuring:
   engine: tshark
   protocols:
     - { name: http,  output_index: ot-logs-http-* }
-    - { name: dnp3,  output_index: ot-logs-dnp3-* }   # Phase5: Signal1(ゾーン逸脱)の実証対象
+    - { name: dnp3,  output_index: ot-logs-dnp3-* }   # Phase5: Signal1(ゾーン逸脱)の実証対象。sub_c_rtuも同一index(1プロトコル=1index、決定事項#39)
+    - { name: opcua, output_index: ot-logs-opcua-* }  # Phase7決定事項#106: historian連携。tshark組み込みdissector(軽い器見込み、要実機検証)
+    - { name: snmp,  output_index: ot-logs-snmp-* }   # Phase7決定事項#106: cc_ups管理。SNMPは最も成熟したtshark対応
 
 detection:
   # Phase4: 前身ot-ids-verumのSignal6(キルチェーン相関)を、環境定義に一切
