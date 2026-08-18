@@ -4,6 +4,18 @@ name: Deploy GUI to Pages
 # GUIはビルドステップの無い静的サイト(素のHTML/CSS/JS)のため、
 # ディレクトリをそのままアップロードするだけで足りる。
 #
+# ■ 初回のみ必要な手動設定(コードでは指定できない)
+#   リポジトリの Settings → Pages → Build and deployment → Source を
+#   「GitHub Actions」に変更する。
+#   未設定のままこのワークフローが動くと、configure-pages/deploy-pages が
+#   `Get Pages site failed` / `Not Found` で失敗する。ワークフロー側の不具合と
+#   紛らわしいので、デプロイが落ちたらまずこの設定を確認すること。
+#   設定後は Actions タブから `Re-run jobs`、または workflow_dispatch で
+#   手動実行すれば公開される。
+#
+#   公開URL: https://<owner>.github.io/<repo>/
+#   (リポジトリがプライベートの場合、Pagesの公開にはGitHub Proが要る)
+#
 # 公開の目的は「インストール不要でブラウザから試せる」状態を作ること。
 # gui/vocab.js・gui/samples.js は platform/tools/gen_gui_vocab.py の生成物で、
 # コミット済みのものをそのまま配る(生成物が古ければCI(ci.yml)のテストが

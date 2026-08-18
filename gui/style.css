@@ -500,6 +500,115 @@ svg#diagram { display: block; width: 100%; height: 100%; }
 }
 .export-note strong { color: var(--warn); font-weight: 600; }
 
+/* ---- 使い方パネル ---- */
+
+#help-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(5, 7, 10, 0.72);
+  backdrop-filter: blur(3px);
+}
+#help-overlay[hidden] { display: none; }
+
+#help-panel {
+  width: min(760px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-solid);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+
+.help-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(22, 28, 36, 0.96), rgba(14, 19, 25, 0.9));
+}
+
+.help-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.help-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 20px 22px;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--text);
+}
+
+.help-body h3 {
+  margin: 22px 0 6px;
+  font-size: 12px;
+  font-family: var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.help-body h3:first-of-type { margin-top: 14px; }
+
+.help-body p { margin: 6px 0; }
+.help-lead { color: var(--text); }
+.help-note { color: var(--muted); font-size: 12.5px; }
+.help-foot {
+  margin-top: 22px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.help-body a { color: var(--accent); }
+
+.help-body code {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.help-steps, .help-list { margin: 6px 0; padding-left: 22px; }
+.help-steps li, .help-list li { margin: 7px 0; }
+.help-steps { counter-reset: none; }
+
+.help-code {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-radius: 7px;
+  background: #05070a;
+  border: 1px solid var(--border);
+  overflow-x: auto;
+}
+.help-code code {
+  background: none;
+  padding: 0;
+  color: var(--text);
+  line-height: 1.7;
+  white-space: pre;
+}
+
+.help-mark { font-family: var(--mono); font-weight: 700; }
+.help-mark-err { color: var(--danger); }
+.help-mark-warn { color: var(--warn); }
+
 /* ---- ドラッグ&ドロップ ---- */
 
 body.dropping::after {

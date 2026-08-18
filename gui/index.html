@@ -19,12 +19,89 @@
   </div>
   <div class="header-meta">
     <select id="template-select" style="width:auto;min-width:210px"></select>
+    <button type="button" class="btn" id="help-btn">使い方</button>
     <div class="stat-group">
       <div class="stat"><span class="stat-value" id="stat-assets">0</span><span class="stat-label">ASSETS</span></div>
       <div class="stat"><span class="stat-value" id="stat-segments">0</span><span class="stat-label">SEGMENTS</span></div>
     </div>
   </div>
 </header>
+
+<!-- 使い方パネル。初回訪問時は自動で開く（以降は閉じた状態を記憶する）。 -->
+<div id="help-overlay" hidden>
+  <div id="help-panel" role="dialog" aria-labelledby="help-title" aria-modal="true">
+    <div class="help-head">
+      <h2 id="help-title">マニフェストの作り方</h2>
+      <button type="button" class="btn btn-sm" id="help-close">閉じる</button>
+    </div>
+    <div class="help-body">
+
+      <p class="help-lead">
+        このエディタは、OT/ICSサイバーレンジの構成を宣言する<strong>マニフェスト（YAML）を書くための道具</strong>です。
+        環境そのものは、書き出したYAMLを手元で <code>docker compose</code> に通して立ち上げます。
+      </p>
+
+      <h3>まず試す</h3>
+      <p>
+        右上のプルダウンから <strong>電力・上下水道・重要製造業</strong> のいずれかを選ぶと、実際に動作確認済みの構成が読み込まれます。
+        まずはこれを触って、編集が図とYAMLにどう反映されるかを見るのが早道です。ゼロから作る場合は「新規（空から作る）」を選びます。
+      </p>
+
+      <h3>作る順序</h3>
+      <p class="help-note">
+        後の項目が前の項目に依存するため、この順序で進めてください。
+        <strong>依存先が無いと選択肢が出ません</strong>（例：<code>l3-router</code> の資産を作る前は、ゲートウェイのプルダウンが空です）。
+      </p>
+      <ol class="help-steps">
+        <li>
+          <strong>セグメント</strong>を作る — ネットワークの区画です。名前・CIDR・種別（OT LAN／WAN境界／観測用など）を決めます。
+          観測（ミラーリング）を使うなら、<strong>観測用のセグメントを1つ</strong>用意しておきます。
+        </li>
+        <li>
+          <strong>資産</strong>を足す — コンテナ1つが資産1つです。ロールを選ぶと、必要な権限（<code>cap_add</code> 等）が自動で決まります。
+          <strong>ゲートウェイ役には <code>l3-router</code> ロールを選び、すべてのセグメントに接続</strong>させます。
+        </li>
+        <li>
+          <strong>ルーティング</strong>でゲートウェイを選ぶ — セグメント間の経路が自動生成されます。
+        </li>
+        <li>
+          <strong>計装層</strong>を有効にし、ミラー集約先セグメントを選ぶ — 残りのセグメントが自動的に観測対象になります（除外したいものだけチェック）。
+          ゲートウェイがミラーリングの実行主体になるため、<strong>ゲートウェイは観測対象と集約先の全セグメントに静的IPが必要</strong>です（不足すると警告が出ます）。
+        </li>
+        <li>
+          <strong>構造化層</strong>を有効にし、プロトコルと出力先indexを登録する — tsharkが該当プロトコルを解析し、Elasticsearchへ投入する配線が生成されます。
+        </li>
+      </ol>
+
+      <h3>画面の見方</h3>
+      <ul class="help-list">
+        <li><strong>中央の図</strong> — 編集するたびに描き直されます。セグメントの枠色と下端バッジが「観測対象／ミラー集約先／観測外（死角）」を示します。破線の矢印がミラーされるトラフィックの流れです。</li>
+        <li><strong>図の下の帯</strong> — 検証結果です。<span class="help-mark help-mark-err">✕</span> はYAMLとして出す前に直すべきもの、<span class="help-mark help-mark-warn">!</span> は宣言としては妥当だが<strong>実際に環境を立ち上げた時に問題になる</strong>ものです。</li>
+        <li><strong>右のYAML</strong> — 常に最新の状態が出ています。手書きする場合の書き方の参考にもなります。</li>
+      </ul>
+
+      <h3>書き出したあと</h3>
+      <p>「YAMLをダウンロード」で保存し、リポジトリを手元に用意したうえで実行します。</p>
+      <pre class="help-code"><code>python platform/cli.py provision &lt;保存したファイル&gt;.yaml
+docker compose -f &lt;保存したファイル&gt;.docker-compose.yml up -d</code></pre>
+      <p>ネットワーク図（自己完結HTML）も生成できます。記事や資料に載せる図はこちらを使ってください。</p>
+      <pre class="help-code"><code>python platform/cli.py diagram &lt;保存したファイル&gt;.yaml</code></pre>
+
+      <h3>つまずきやすいところ</h3>
+      <ul class="help-list">
+        <li><strong>起動コマンドに二重引用符を使わない</strong> — 生成されるコマンドは最終的に <code>sh -c "..."</code> で包まれるため、中の二重引用符が包みを破ります。単一引用符を使ってください（警告が出ます）。</li>
+        <li><strong>コメントは保持されません</strong> — 書き出しは常に新しいファイル（<code>&lt;name&gt;.generated.yaml</code>）です。手書きのマニフェストを読み込んで書き戻すと、そこに書かれていた説明は失われます。</li>
+        <li><strong>検知ロジック・攻撃・ダッシュボードはここでは作れません</strong> — それらはマニフェスト外のスクリプトとして書く領域です。エディタが扱うのは環境の「器」の部分（構成・観測・構造化）までです。</li>
+      </ul>
+
+      <p class="help-foot">
+        詳しい解説は <a href="https://github.com/schutzz/ot-range-amenonuboco/blob/main/docs/gui-guide.md" target="_blank" rel="noopener">エディタの使い方</a>、
+        記法の全リファレンスは <a href="https://github.com/schutzz/ot-range-amenonuboco/blob/main/docs/manifest-schema-guide.md" target="_blank" rel="noopener">マニフェスト記法ガイド</a> にあります。
+      </p>
+
+    </div>
+  </div>
+</div>
 
 <div id="layout">
 

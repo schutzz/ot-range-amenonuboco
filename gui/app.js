@@ -546,6 +546,50 @@
     }
   }
 
+  // 使い方パネル。初見の利用者が画面だけで完結できるようにするのが主目的の
+  // ため、初回訪問時は自動で開く。一度閉じたら以降は開かない(localStorageが
+  // 使えない環境では毎回開くが、実害は無い)。
+  const HELP_SEEN_KEY = 'amenonuboco.help.seen';
+
+  function helpSeen() {
+    try {
+      return window.localStorage.getItem(HELP_SEEN_KEY) === '1';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function markHelpSeen() {
+    try {
+      window.localStorage.setItem(HELP_SEEN_KEY, '1');
+    } catch (e) {
+      /* プライベートモード等では記憶しない */
+    }
+  }
+
+  function openHelp() {
+    $('help-overlay').hidden = false;
+    $('help-close').focus();
+  }
+
+  function closeHelp() {
+    $('help-overlay').hidden = true;
+    markHelpSeen();
+  }
+
+  function setupHelp() {
+    $('help-btn').addEventListener('click', openHelp);
+    $('help-close').addEventListener('click', closeHelp);
+    // 背景クリックで閉じる(パネル内のクリックは拾わない)
+    $('help-overlay').addEventListener('click', (e) => {
+      if (e.target === $('help-overlay')) closeHelp();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !$('help-overlay').hidden) closeHelp();
+    });
+    if (!helpSeen()) openHelp();
+  }
+
   function setupDropZone() {
     let depth = 0;
     window.addEventListener('dragenter', (e) => {
@@ -644,6 +688,7 @@
 
     setupPanZoom();
     setupDropZone();
+    setupHelp();
 
     // 初期表示は電力リファレンス。空の画面より、動く実例が出ている方が
     // 「何ができるものか」が一目で伝わる。
