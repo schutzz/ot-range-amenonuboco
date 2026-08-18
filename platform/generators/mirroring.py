@@ -57,6 +57,34 @@ def _idempotent_mirror_block(segment_if_var: str, mirror_if_var: str) -> list[st
     ]
 
 
+def _mirror_egress_broadcast_block(mirror_if_var: str) -> list[str]:
+    """ミラー先IFのegressで、送出フレームの宛先MACをブロードキャストに書き換える
+    冪等化済みブロック(決定事項#116、罠ログ#031)。
+
+    背景: tcミラーリング(ingress mirred)は両方向のパケットを正しくミラー先IFへ
+    送出するが、ミラーコピーの宛先MACは「元パケットが宛てていたゲートウェイ自身の
+    受信IF MAC」という、観測用セグメント(mirror_link)のDockerブリッジから見れば
+    "よそ者MAC"になる。Linuxブリッジはこの unknown-unicast を確実にはフラッディング
+    せず(MAC学習状態・タイミング依存)、観測ノード(structurer/observer)へ届く方向が
+    片方向に偏る・実行のたびに変わる、という非決定的な取りこぼしが起きる。
+    SNMP/ENIP等の単発・片方向の攻撃検知では表面化しなかったが、VNC等の
+    ステートフルな双方向TCPセッションでは、クライアント側メッセージ(キー入力等)を
+    含む片方向が丸ごと欠落し、tsharkが状態を再構成できずキーストローク内容を
+    構造化できなくなる(実機切り分けで特定)。
+
+    対策: ミラー先IFのegress(=ミラーコピーだけがほぼ独占的に流れる経路)で宛先MACを
+    ブロードキャスト(ff:ff:ff:ff:ff:ff)へ書き換える。ブロードキャストフレームは
+    ブリッジが常に全ポートへ配送するため、観測ノードは両方向を確実に受信できる。
+    観測ノードはIP層で自分宛でないフレームを破棄するだけで実害はない。
+    """
+    return [
+        f"tc qdisc add dev ${mirror_if_var} root handle 1: prio 2>/dev/null",
+        f"tc filter del dev ${mirror_if_var} parent 1: 2>/dev/null",
+        f"tc filter add dev ${mirror_if_var} parent 1: protocol all u32 "
+        f"match u32 0 0 action pedit ex munge eth dst set ff:ff:ff:ff:ff:ff",
+    ]
+
+
 def generate_mirroring_commands(
     topology: Topology, instrumentation: Instrumentation
 ) -> list[str]:
@@ -68,6 +96,10 @@ def generate_mirroring_commands(
 
     mirror_ip = _require_gateway_ip(gateway, instrumentation.mirror_to)
     commands: list[str] = [resolve_interface_snippet("MIRROR_IF", mirror_ip)]
+    # ミラー先IFのegress宛先MACブロードキャスト書換(決定事項#116)。個々の
+    # セグメントのingressミラー設定より先に置く(ミラーコピーが流れ始める前に
+    # 書換規則を用意しておく)。
+    commands.extend(_mirror_egress_broadcast_block("MIRROR_IF"))
 
     for segment in instrumentation.observed_segments(topology):
         seg_ip = _require_gateway_ip(gateway, segment.name)
