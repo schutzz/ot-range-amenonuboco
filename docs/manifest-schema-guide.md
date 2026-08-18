@@ -166,7 +166,7 @@ topology:
       overrides:
         environment:
           - "discovery.type=single-node"
-          - "xpack.security.enabled=false"     # 未設定だと既定でTLS必須起動になる(Phase3決定事項#48)
+          - "xpack.security.enabled=false"     # 未設定だと既定でTLS必須起動になり、プレーンHTTPが届かない
 ```
 
 ### 2.5 初期化処理をマニフェストに書かないこと
@@ -183,7 +183,7 @@ topology:
 
 > **注意（`overrides.command` にバックグラウンド起動を書く場合）**：`overrides.command` はアプリ本体の起動内容としてユーザーが自由に書ける領域ですが、生成されるコンテナの起動コマンド全体は内部的に `install && routing && ... && <overrides.command>` という形で連結されます。ここに `python3 app.py & tail -f /dev/null` のように**裸の `&`（バックグラウンド起動）を書くと、この連結処理と衝突して意図と異なる解釈をされる**ことがあります（Phase5実装時に実際に遭遇。動くように見えても偶然の産物であり、資産構成によっては動かないこともあります）。バックグラウンド起動が必要な場合は、`"( app.py & wait )"` のようにサブシェルで囲んでください。これにより `overrides.command` 全体が単一の安全なブロッキングコマンドになります。
 
-> **注意（`overrides.command` 内で二重引用符 `"` を使う場合）**：生成されるコンテナのコマンド全体は最終的に `sh -c "<すべてを連結した文字列>"` という**二重引用符でまるごと囲む**形になります（`generators/compose.py` の `_assemble_command()`）。`overrides.command` 内に `echo "hello"` のような二重引用符を（特に2箇所以上）書くと、この外側の二重引用符と衝突し、生成コマンドがシェル単語分割で意図しない位置で寸断されることがあります（Phase7実装時に実際に遭遇、罠ログ#025）。`overrides.command` 内のリテラル文字列は**単一引用符 `'...'` を使ってください**（単一引用符は変数展開されないため、変数を埋め込みたい場合は引用符自体を外すか `case` 文の glob パターンで代替してください）。この制約に反すると生成時のテストでは検出できても、実機の `docker compose up` 時点まで気づけない場合があります。
+> **注意（`overrides.command` 内で二重引用符 `"` を使う場合）**：生成されるコンテナのコマンド全体は最終的に `sh -c "<すべてを連結した文字列>"` という**二重引用符でまるごと囲む**形になります（`generators/compose.py` の `_assemble_command()`）。`overrides.command` 内に `echo "hello"` のような二重引用符を（特に2箇所以上）書くと、この外側の二重引用符と衝突し、生成コマンドがシェル単語分割で意図しない位置で寸断されることがあります（実機検証で実際に遭遇した問題です）。`overrides.command` 内のリテラル文字列は**単一引用符 `'...'` を使ってください**（単一引用符は変数展開されないため、変数を埋め込みたい場合は引用符自体を外すか `case` 文の glob パターンで代替してください）。この制約に反すると生成時のテストでは検出できても、実機の `docker compose up` 時点まで気づけない場合があります。
 
 ---
 
@@ -236,7 +236,7 @@ structuring:
 |---|---|---|
 | `engine` | ✅ | 既定の構造化エンジン。通常 `tshark` |
 | `protocols[].name` | ✅ | 構造化するプロトコル |
-| `protocols[].output_index` | ✅ | 出力先の Elasticsearch index の**検索パターン**（Kibana/Grafana の index pattern 相当）。命名は `ot-logs-<protocol>-*` に統一。実際の書き込み先は、末尾の `*` をUTC日付（`%Y.%m.%d`）に置き換えた具体的な日次index（例: `ot-logs-http-2026.08.16`）で、プロビジョナ側が自動導出する（Phase3決定事項#49） |
+| `protocols[].output_index` | ✅ | 出力先の Elasticsearch index の**検索パターン**（Kibana/Grafana の index pattern 相当）。命名は `ot-logs-<protocol>-*` に統一。実際の書き込み先は、末尾の `*` をUTC日付（`%Y.%m.%d`）に置き換えた具体的な日次index（例: `ot-logs-http-2026.08.16`）で、プロビジョナ側が自動導出します |
 | `exceptions[]` | ✕ | tshark では扱えない/不都合なプロトコルを、別エンジン（Spicy/Zeek 独立 sidecar）で処理する例外指定 |
 
 > **tshark を既定にする理由**：Wireshark の広範な dissector ライブラリを、新プロトコル対応のスケールの源泉にするためです。プロトコルごとに自作パーサーを書くのは実装・デバッグコストが高く、「マニフェストで宣言したら新プロトコルに対応」という目標に向きません。
@@ -257,7 +257,7 @@ structuring:
 | `ot-lan` | OT LAN（DNP3/Modbus 等） | — |
 | `observation` | 観測用ミラーネットワーク | 観測系として区別 |
 | `dmz` | 非武装地帯 | — |
-| `security-lan` | 物理セキュリティ網（監視カメラ・入退室管理等） | Phase7決定事項#104 |
+| `security-lan` | 物理セキュリティ網（監視カメラ・入退室管理等） | 制御プロセス系とは別のリスクプロファイルとして区別 |
 
 ### 5.2 資産ロール（`role`）
 
@@ -274,8 +274,8 @@ structuring:
 | `attacker-external` | 境界外の攻撃者 | external_attacker |
 | `attacker-internal` | 内部に置いた踏み台攻撃者 | red-team |
 | `attacker-insider` | 侵害された正規資産 | sub_a_ied_02 |
-| `security-asset` | 物理セキュリティ資産（NVR/IPカメラ/入退室管理パネル） | （Phase7新設、決定事項#104） |
-| `remote-access-gateway` | 正規のリモート保守経路（RDP/VNC等の終端点、侵害の起点になりうる） | （Phase7新設、決定事項#105、Oldsmar型） |
+| `security-asset` | 物理セキュリティ資産（NVR/IPカメラ/入退室管理パネル） | （前身には該当なし。重要製造業シナリオ向けに新設） |
+| `remote-access-gateway` | 正規のリモート保守経路（RDP/VNC等の終端点、侵害の起点になりうる） | （前身には該当なし。上下水道シナリオ向けに新設） |
 
 各ロールには実行属性のプリセット（capability・sysctl・接続すべき既定セグメント等）が紐づく想定です。プリセットの完全な定義は Phase 1 で確定します。
 
