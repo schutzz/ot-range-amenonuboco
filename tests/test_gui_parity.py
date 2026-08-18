@@ -224,6 +224,14 @@ def _mutate_asset_without_networks(m: dict) -> None:
     m["topology"]["assets"][1]["networks"] = []
 
 
+def _mutate_structuring_without_structurer(m: dict) -> None:
+    # 構造化パイプラインの実行主体が居ないと、protocols を宣言しても
+    # tshark が1つも起動しない（生成器が黙って空のコマンド列を返す）。
+    m["topology"]["assets"] = [
+        a for a in m["topology"]["assets"] if a["role"] != "structurer"
+    ]
+
+
 REJECT_CASES = {
     "duplicate_segment_name": _mutate_duplicate_segment_name,
     "duplicate_asset_name": _mutate_duplicate_asset_name,
@@ -240,6 +248,7 @@ REJECT_CASES = {
     "exclude_undefined_segment": _mutate_exclude_undefined,
     "duplicate_protocol_name": _mutate_duplicate_protocol,
     "structuring_without_instrumentation": _mutate_structuring_without_instrumentation,
+    "structuring_without_structurer_asset": _mutate_structuring_without_structurer,
     "asset_without_networks": _mutate_asset_without_networks,
 }
 

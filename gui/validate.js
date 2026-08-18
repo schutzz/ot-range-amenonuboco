@@ -260,6 +260,17 @@
           'structuring'
         );
       }
+      // 構造化パイプラインの実行主体は structurer ロールの資産。1つも無いと、
+      // プロトコルを宣言しても tshark が1つも起動しない(生成器が黙って
+      // 空のコマンド列を返す)。宣言したのに静かに動かない状態を宣言時に弾く。
+      if (protoNames.length && !assets.some((a) => a.role === 'structurer')) {
+        err(
+          'structuring（protocols）を宣言するには role: structurer の資産が' +
+            '最低1つ必要です（構造化パイプラインの実行主体が無いと、宣言しても' +
+            'tshark が1つも起動しません）',
+          'structuring'
+        );
+      }
     }
 
     // --- 警告: ゲートウェイの静的IP不足 ---

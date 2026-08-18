@@ -121,11 +121,23 @@ topology:
 |---|---|---|
 | `name` | ✅ | 資産名 |
 | `role` | ✅ | 資産ロール（§5.2の語彙）。実行属性のプリセットと図の表現を決める |
-| `image` | ✅ | 既存イメージ名、または `./dir` 形式のローカルビルド元 |
+| `image` | ✅ | 既存イメージ名（例 `python:3.10-slim`）、または**ローカルのDockerfileを指すパス**（下記） |
 | `networks` | ✅ | **接続するセグメントの配列**（マルチホーム対応）。各要素は `segment`（必須）と `ip`（任意、省略時は動的割当） |
 | `overrides` | ✕ | ロールのプリセットを上書きする例外設定（§2.4） |
 
 > **重要：`networks` は必ず配列**。単一接続でも配列で書きます。前身 `ot-ids-verum` の `wan_router`（5接続）や攻撃者ノード（2接続）のようなマルチホームを、例外扱いせず一貫して表現するためです。
+
+> **`image` にローカルのDockerfileを指定する**：`image` の値が `./` または `../` で始まる場合、既存イメージ名ではなく**ビルドコンテキストのパス**として扱われ、生成される `docker-compose.yml` には `image:` ではなく `build:` が出力されます。パスはマニフェストからの相対で書きます。
+>
+> ```yaml
+> - name: reactor_plc
+>   role: ot-asset
+>   image: ../protocol-images/modbus     # ../protocol-images/modbus/Dockerfile をビルド
+>   overrides:
+>     environment: [ "MODE=server" ]
+> ```
+>
+> 独自のプロトコル実装やシミュレータをコンテナ化して資産に載せたい場合に使います。本リポジトリは、分野をまたいで再利用できるプロトコル実装を [`protocol-images/`](../protocol-images/) に用意しています——使い方は [プロトコル資産の使用法](./protocol-assets.md) を参照してください。
 
 ### 2.3 ルーティング（`routing`）
 
@@ -238,6 +250,10 @@ structuring:
 | `protocols[].name` | ✅ | 構造化するプロトコル |
 | `protocols[].output_index` | ✅ | 出力先の Elasticsearch index の**検索パターン**（Kibana/Grafana の index pattern 相当）。命名は `ot-logs-<protocol>-*` に統一。実際の書き込み先は、末尾の `*` をUTC日付（`%Y.%m.%d`）に置き換えた具体的な日次index（例: `ot-logs-http-2026.08.16`）で、プロビジョナ側が自動導出します |
 | `exceptions[]` | ✕ | tshark では扱えない/不都合なプロトコルを、別エンジン（Spicy/Zeek 独立 sidecar）で処理する例外指定 |
+
+> **前提となる資産・層**：`structuring` を宣言するには、①`instrumentation` 層（構造化の対象は「ミラーされたトラフィック」のため）と、②**`role: structurer` の資産が最低1つ**（構造化パイプラインの実行主体）が必要です。どちらも欠けていると宣言時にエラーになります。特に②が無い状態は、コンテナは正常に起動し図も描かれるのに **tshark が1つも起動しない**（宣言したのに静かに動かない）という気づきにくい状態になるため、宣言の時点で弾いています。
+>
+> `structurer` 資産は、観測用セグメント（パケットを見る側）と、Elasticsearch がいるセグメント（書き込む側）の**両方に接続**し、観測用セグメント上では**静的IP**を持つ必要があります（自分のIPからインターフェース名を解決するため）。
 
 > **tshark を既定にする理由**：Wireshark の広範な dissector ライブラリを、新プロトコル対応のスケールの源泉にするためです。プロトコルごとに自作パーサーを書くのは実装・デバッグコストが高く、「マニフェストで宣言したら新プロトコルに対応」という目標に向きません。
 >
@@ -476,6 +492,16 @@ topology:
       image: curlimages/curl:latest
       networks:
         - { segment: cc_lan }        # IP動的割当
+    # 構造化パイプライン（tshark＋バルクローダー）の実行ノード。
+    # structuring 層を宣言するなら、この role の資産が最低1つ必要（§4参照）。
+    # 観測用セグメント（パケットを見る側）と、書き込み先セグメント
+    # （Elasticsearch がいる側）の両方へ接続する。
+    - name: log_structurer
+      role: structurer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link, ip: 10.0.99.60 }
+        - { segment: cc_lan,      ip: 10.0.10.60 }
     # 検知プラグインのホスト・攻撃者・攻撃エンジンも、すべて資産として置く
     - name: killchain_detector
       role: detection-infra
