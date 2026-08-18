@@ -23,6 +23,7 @@ SegmentKind = Literal[
     "ot-lan",
     "observation",
     "dmz",
+    "security-lan",  # Phase7決定事項#104: 物理セキュリティ網(監視カメラ・入退室管理等)
 ]
 
 AssetRole = Literal[
@@ -37,6 +38,8 @@ AssetRole = Literal[
     "attacker-external",
     "attacker-internal",
     "attacker-insider",
+    "security-asset",  # Phase7決定事項#104: 物理セキュリティ資産(NVR/カメラ/入退室管理パネル)
+    "remote-access-gateway",  # Phase7決定事項#105: 正規リモート保守経路(侵害の起点になりうる、Oldsmar型)
 ]
 
 

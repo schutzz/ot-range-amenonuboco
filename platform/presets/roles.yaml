@@ -95,3 +95,28 @@ roles:
     # 前身(ot-ids-verum)での該当例: sub_a_ied_02
     cap_add: [NET_ADMIN, NET_RAW]
     sysctls: []
+
+  security-asset:
+    # 物理セキュリティ資産(NVR/IPカメラ/入退室管理パネル)。Phase7決定事項#104。
+    # 制御プロセスの資産(ot-asset)とは意味的に区別する。NET_ADMINは既定で
+    # 持たせる(ot-assetロールと同じ、罠ログ#029の教訓——マルチホームや
+    # 他セグメント宛ての応答が必要になるケースを将来塞がないため)。
+    cap_add: [NET_ADMIN]
+    sysctls: []
+
+  remote-access-gateway:
+    # 正規のリモート保守経路(RDP/VNC等の終端点)。侵害されるとOT系セグメント
+    # への踏み台になりうる(Oldsmar型、Phase7決定事項#105)。IPフォワード
+    # (net.ipv4.ip_forward=1、他ホストの通信を転送する権限)は不要——
+    # セグメント間ルーティングは既存のl3-router/wan_routerが別途担う。
+    # ただし**NET_ADMINは必要**(Phase7決定事項#114、罠ログ#029)。
+    # generators/compose.py の`needs_routing`判定は`NET_ADMIN in cap_add`を
+    # 条件にしており、これが無いとマルチホーム資産自身が「直接接続していない
+    # セグメントへの経路(ip route add)」を一切持てない(IPフォワード=他者の
+    # 通信を転送する権限、と、自分自身の応答パケットを送り返すための経路、は
+    # 別の話であり、後者にはNET_ADMINが要る)。当初は前者と混同してcap_add
+    # を空にしたため、ゲートウェイが越境した攻撃者への応答経路を持てず、
+    # Dockerが自動付与した無関係なデフォルトゲートウェイへ応答パケットが
+    # 消えるという不具合を実機検証で発見した。
+    cap_add: [NET_ADMIN]
+    sysctls: []
