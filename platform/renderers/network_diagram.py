@@ -262,8 +262,8 @@ def _info_panel_html(manifest: Manifest, observed: set[str], mirror_to: str | No
             else '<div class="info-ok">死角なし</div>'
         )
         blocks.append(
-            '<div class="info-block">'
-            '<div class="info-title">計装（観測カバレッジ）</div>'
+            '<div class="info-block info-block--coverage">'
+            '<div class="info-title"><span class="info-icon">◉</span>計装（観測カバレッジ）</div>'
             f'<div class="info-row"><span>ミラー集約先</span><code>{_esc(mirror_to)}</code></div>'
             f'<div class="info-row"><span>観測対象</span>'
             f"<code>{len(observed)} / {candidates} セグメント</code></div>"
@@ -279,8 +279,8 @@ def _info_panel_html(manifest: Manifest, observed: set[str], mirror_to: str | No
             for p in structuring.protocols
         )
         blocks.append(
-            '<div class="info-block">'
-            f'<div class="info-title">構造化（{_esc(structuring.engine)}）</div>'
+            '<div class="info-block info-block--structuring">'
+            f'<div class="info-title"><span class="info-icon">◆</span>構造化（{_esc(structuring.engine)}）</div>'
             f"{rows}"
             "</div>"
         )
@@ -293,8 +293,8 @@ def _info_panel_html(manifest: Manifest, observed: set[str], mirror_to: str | No
             for p in detection.plugins
         )
         blocks.append(
-            '<div class="info-block">'
-            '<div class="info-title">検知プラグイン（→ ホスト）</div>'
+            '<div class="info-block info-block--detection">'
+            '<div class="info-title"><span class="info-icon">▲</span>検知プラグイン（→ ホスト）</div>'
             f"{rows}"
             "</div>"
         )
@@ -308,15 +308,15 @@ def _info_panel_html(manifest: Manifest, observed: set[str], mirror_to: str | No
                 f"<code>{len(visualization.dashboards)} 件</code></div>"
             )
         blocks.append(
-            '<div class="info-block">'
-            f'<div class="info-title">可視化（{_esc(visualization.engine)}）</div>'
+            '<div class="info-block info-block--visualization">'
+            f'<div class="info-title"><span class="info-icon">◈</span>可視化（{_esc(visualization.engine)}）</div>'
             f"{rows}"
             "</div>"
         )
 
     if not blocks:
         return ""
-    return f'<div class="info-panel">{"".join(blocks)}</div>'
+    return f'<div class="panel info-panel">{"".join(blocks)}</div>'
 
 
 def render_network_diagram(manifest: Manifest) -> str:
@@ -349,7 +349,7 @@ def render_network_diagram(manifest: Manifest) -> str:
             title += f"\n{badge}"
         svg_parts.append(
             f'<g class="segment">'
-            f'<rect x="{x:.1f}" y="{y:.1f}" width="{_SEGMENT_BOX_W}" height="{box_h:.1f}" '
+            f'<rect class="seg-rect" x="{x:.1f}" y="{y:.1f}" width="{_SEGMENT_BOX_W}" height="{box_h:.1f}" '
             f'rx="10" fill="{fill}" stroke="{border_color}" stroke-width="{border_w}">'
             f"<title>{_esc(title)}</title>"
             f"</rect>"
@@ -436,7 +436,7 @@ def render_network_diagram(manifest: Manifest) -> str:
         if viz_label is not None:
             title += f"\n可視化エンジン: {viz_label}"
         multihomed_ring = (
-            f'<circle cx="{ax:.1f}" cy="{ay:.1f}" r="{_NODE_R + 4}" fill="none" '
+            f'<circle class="node-ring" cx="{ax:.1f}" cy="{ay:.1f}" r="{_NODE_R + 4}" fill="none" '
             f'stroke="{color}" stroke-width="1.5" opacity="0.5" />'
             if len(seg_names) > 1
             else ""
@@ -456,8 +456,8 @@ def render_network_diagram(manifest: Manifest) -> str:
             f'<g class="asset-node">'
             f"{multihomed_ring}"
             f"{detection_mark}"
-            f'<circle cx="{ax:.1f}" cy="{ay:.1f}" r="{_NODE_R}" fill="{color}" '
-            f'stroke="#0d1117" stroke-width="1.5">'
+            f'<circle class="node-dot" cx="{ax:.1f}" cy="{ay:.1f}" r="{_NODE_R}" fill="{color}" '
+            f'style="color:{color}" stroke="#0d1117" stroke-width="1.5">'
             f"<title>{_esc(title)}</title>"
             f"</circle>"
             f'<text x="{ax:.1f}" y="{ay + _NODE_R + 13:.1f}" class="asset-label" '
@@ -498,6 +498,16 @@ def render_network_diagram(manifest: Manifest) -> str:
     title_text = _esc(manifest.metadata.name)
     desc_text = _esc(manifest.metadata.description or "")
     layer_note = _layer_note(manifest)
+    # ヘッダーのチップ表示用。_layer_note の文字列(" / "区切り)をそのまま
+    # 再分割するだけで、判定ロジックは一切再実装しない(決定事項#50と同じ方針)。
+    layer_chips = "".join(
+        f'<span class="chip">{_esc(layer)}</span>' for layer in layer_note.split(" / ")
+    )
+    asset_count = len(topology.assets)
+    segment_count = len(topology.segments)
+
+    structuring_accent = _ROLE_COLORS["structurer"]
+    visualization_accent = _ROLE_COLORS["visualization-engine"]
 
     return f"""<!doctype html>
 <html lang="ja">
@@ -506,66 +516,187 @@ def render_network_diagram(manifest: Manifest) -> str:
 <title>Amenonuboco Network Diagram — {title_text}</title>
 <style>
   :root {{
-    --bg: #0d1117;
-    --panel: #161b22;
-    --text: #c9d1d9;
+    --bg: #05070a;
+    --panel: rgba(13, 17, 23, 0.82);
+    --panel-solid: #0e1319;
+    --border: rgba(90, 122, 145, 0.28);
+    --border-strong: rgba(120, 156, 180, 0.45);
+    --text: #e6edf3;
     --muted: #8b949e;
-    --border: #30363d;
+    --accent: {_OBSERVED_BORDER_COLOR};
+    --accent-soft: rgba(79, 209, 197, 0.14);
+    --danger: {_BLIND_BORDER_COLOR};
+    --mono: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", sans-serif;
   }}
   * {{ box-sizing: border-box; }}
+  html, body {{ height: 100%; margin: 0; }}
   body {{
-    margin: 0;
+    display: flex;
+    flex-direction: column;
     background: var(--bg);
     color: var(--text);
-    font-family: -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", sans-serif;
+    font-family: var(--sans);
+    overflow: hidden;
+  }}
+  /* うっすらとしたグリッド + ビネットで「監視卓」らしい空気を出す(CSSのみ、外部画像なし) */
+  body::before {{
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background-image:
+      linear-gradient(rgba(79, 209, 197, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(79, 209, 197, 0.05) 1px, transparent 1px),
+      radial-gradient(ellipse at 50% 0%, rgba(79, 209, 197, 0.08), transparent 62%);
+    background-size: 42px 42px, 42px 42px, 100% 100%;
   }}
   header {{
-    padding: 16px 24px;
+    position: relative;
+    z-index: 2;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 12px 22px;
     border-bottom: 1px solid var(--border);
-    background: var(--panel);
+    background: linear-gradient(180deg, rgba(16, 21, 28, 0.96), rgba(13, 17, 23, 0.9));
+    backdrop-filter: blur(10px);
+    flex-wrap: wrap;
   }}
-  header h1 {{ margin: 0 0 4px 0; font-size: 18px; }}
-  header p {{ margin: 0; color: var(--muted); font-size: 13px; }}
+  .brand {{ display: flex; align-items: center; gap: 12px; min-width: 0; }}
+  .brand-glyph {{
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent-soft);
+    border: 1px solid rgba(79, 209, 197, 0.4);
+    color: var(--accent);
+    font-size: 16px;
+  }}
+  header h1 {{
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }}
+  header .subtitle {{
+    margin: 2px 0 0 0;
+    color: var(--muted);
+    font-size: 11.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }}
+  .header-meta {{ display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }}
+  .status-pill {{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    border: 1px solid rgba(79, 209, 197, 0.35);
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+  }}
+  .status-dot {{
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px 1px var(--accent);
+    animation: pulse 1.8s ease-in-out infinite;
+  }}
+  @keyframes pulse {{
+    0%, 100% {{ opacity: 1; transform: scale(1); }}
+    50% {{ opacity: 0.45; transform: scale(0.75); }}
+  }}
+  .chips {{ display: flex; gap: 6px; flex-wrap: wrap; }}
+  .chip {{
+    padding: 3px 9px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 10.5px;
+    font-family: var(--mono);
+    white-space: nowrap;
+  }}
+  .stat-group {{ display: flex; gap: 16px; }}
+  .stat {{ display: flex; flex-direction: column; align-items: flex-end; line-height: 1.1; }}
+  .stat-value {{ font-family: var(--mono); font-size: 15px; font-weight: 700; color: var(--text); }}
+  .stat-label {{ font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em; color: var(--muted); }}
   #canvas-wrap {{
-    width: 100%;
-    height: calc(100vh - 90px);
+    position: relative;
+    z-index: 1;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow: hidden;
     cursor: grab;
   }}
   #canvas-wrap.grabbing {{ cursor: grabbing; }}
-  svg {{ display: block; }}
+  svg {{ display: block; width: 100%; height: 100%; }}
   .seg-label {{ fill: var(--text); font-size: 13px; font-weight: 600; }}
   .seg-sub {{ fill: var(--muted); font-size: 10px; }}
   .seg-badge {{ font-size: 10px; font-weight: 600; }}
+  .seg-rect {{ filter: url(#segment-glow); }}
   .asset-label {{ fill: var(--text); font-size: 9px; }}
+  .node-dot {{ filter: url(#node-glow); }}
   .spoke {{ stroke: #4a5568; stroke-width: 1.2; opacity: 0.6; }}
   .mirror-flow {{
     stroke: {_MIRROR_FLOW_COLOR};
-    stroke-width: 1.4;
+    stroke-width: 1.5;
     stroke-dasharray: 6 5;
-    opacity: 0.55;
+    opacity: 0.65;
+    animation: flow 1.1s linear infinite;
   }}
-  .info-panel {{
-    position: fixed;
-    left: 16px;
-    top: 106px;
+  @keyframes flow {{ to {{ stroke-dashoffset: -22; }} }}
+  .panel {{
+    position: absolute;
+    z-index: 3;
     background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
     padding: 12px 14px;
     font-size: 12px;
-    min-width: 232px;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
   }}
+  .info-panel {{ left: 16px; top: 16px; min-width: 236px; max-width: 260px; }}
+  .info-block {{ border-left: 2px solid transparent; padding-left: 10px; }}
   .info-block + .info-block {{
     margin-top: 12px;
     padding-top: 12px;
     border-top: 1px solid var(--border);
   }}
+  .info-block--coverage {{ border-left-color: {_OBSERVED_BORDER_COLOR}; }}
+  .info-block--structuring {{ border-left-color: {structuring_accent}; }}
+  .info-block--detection {{ border-left-color: {_DETECTION_MARK_COLOR}; }}
+  .info-block--visualization {{ border-left-color: {visualization_accent}; }}
   .info-title {{
+    display: flex;
+    align-items: center;
+    gap: 6px;
     font-weight: 600;
     margin-bottom: 6px;
     color: var(--text);
+    font-size: 11.5px;
+    letter-spacing: 0.02em;
   }}
+  .info-icon {{ font-size: 10px; opacity: 0.85; }}
   .info-row {{
     display: flex;
     justify-content: space-between;
@@ -575,65 +706,137 @@ def render_network_diagram(manifest: Manifest) -> str:
   }}
   .info-row code {{
     color: var(--text);
+    font-family: var(--mono);
     font-size: 11px;
   }}
-  .info-blind {{ margin-top: 5px; color: {_BLIND_BORDER_COLOR}; }}
-  .info-ok {{ margin-top: 5px; color: {_OBSERVED_BORDER_COLOR}; }}
-  .legend {{
-    position: fixed;
-    right: 16px;
-    bottom: 16px;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px 14px;
-    font-size: 12px;
-  }}
-  .legend-item {{ display: flex; align-items: center; gap: 6px; margin: 3px 0; }}
-  .dot {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; }}
+  .info-blind {{ margin-top: 5px; color: {_BLIND_BORDER_COLOR}; font-family: var(--mono); font-size: 11px; }}
+  .info-ok {{ margin-top: 5px; color: {_OBSERVED_BORDER_COLOR}; font-family: var(--mono); font-size: 11px; }}
+  .legend {{ right: 16px; bottom: 16px; }}
+  .legend-item {{ display: flex; align-items: center; gap: 7px; margin: 4px 0; color: var(--muted); font-size: 11.5px; }}
+  .dot {{ width: 9px; height: 9px; border-radius: 50%; display: inline-block; box-shadow: 0 0 5px 0 currentColor; }}
   .bar {{ width: 10px; height: 3px; border-radius: 2px; display: inline-block; }}
   .box {{ width: 9px; height: 9px; border: 1.5px dashed; border-radius: 2px; display: inline-block; }}
   .legend-sep {{ height: 1px; background: var(--border); margin: 7px 0; }}
+  .zoom-toolbar {{
+    position: absolute;
+    z-index: 3;
+    top: 16px;
+    right: 16px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    background: var(--panel);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    padding: 4px;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  }}
+  .zoom-toolbar button {{
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 14px;
+    cursor: pointer;
+  }}
+  .zoom-toolbar button:hover {{ background: var(--accent-soft); color: var(--accent); }}
+  #zoom-readout {{
+    min-width: 42px;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }}
+  .hint {{
+    position: absolute;
+    z-index: 3;
+    left: 16px;
+    bottom: 16px;
+    padding: 5px 10px;
+    border-radius: 6px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 10px;
+    backdrop-filter: blur(12px);
+  }}
 </style>
 </head>
 <body>
 <header>
-  <h1>Amenonuboco Network Diagram — {title_text}</h1>
-  <p>{desc_text}（描画: {layer_note}。マウスホイールでズーム、ドラッグでパン。ノード・セグメントにカーソルを合わせると詳細を表示）</p>
+  <div class="brand">
+    <span class="brand-glyph">◈</span>
+    <div>
+      <h1>{title_text}</h1>
+      <p class="subtitle">{desc_text}</p>
+    </div>
+  </div>
+  <div class="header-meta">
+    <span class="status-pill"><span class="status-dot"></span>LIVE</span>
+    <div class="chips">{layer_chips}</div>
+    <div class="stat-group">
+      <div class="stat"><span class="stat-value">{asset_count}</span><span class="stat-label">ASSETS</span></div>
+      <div class="stat"><span class="stat-value">{segment_count}</span><span class="stat-label">SEGMENTS</span></div>
+    </div>
+  </div>
 </header>
 <div id="canvas-wrap">
-  <svg id="diagram" viewBox="0 0 {_VIEW_W} {_VIEW_H}" width="100%" height="100%"
+  <svg id="diagram" viewBox="0 0 {_VIEW_W} {_VIEW_H}"
        preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <marker id="mirror-arrow" viewBox="0 0 10 10" refX="9" refY="5"
               markerWidth="6" markerHeight="6" orient="auto-start-reverse">
         <path d="M 0 0 L 10 5 L 0 10 z" fill="{_MIRROR_FLOW_COLOR}" opacity="0.7" />
       </marker>
+      <filter id="segment-glow" x="-20%" y="-20%" width="140%" height="140%">
+        <feDropShadow dx="0" dy="0" stdDeviation="2.2" flood-color="#000000" flood-opacity="0.35" />
+      </filter>
+      <filter id="node-glow" x="-140%" y="-140%" width="380%" height="380%">
+        <feDropShadow dx="0" dy="0" stdDeviation="2.4" flood-color="currentColor" flood-opacity="0.9" />
+      </filter>
     </defs>
     <g id="viewport">
 {svg_body}
     </g>
   </svg>
+  {info_panel}
+  <div class="panel legend">{legend_items}</div>
+  <div class="zoom-toolbar">
+    <button type="button" id="zoom-out" aria-label="ズームアウト">−</button>
+    <span id="zoom-readout">100%</span>
+    <button type="button" id="zoom-in" aria-label="ズームイン">＋</button>
+    <button type="button" id="zoom-reset" aria-label="表示をリセット">⟲</button>
+  </div>
+  <div class="hint">SCROLL ズーム ・ DRAG パン ・ HOVER 詳細</div>
 </div>
-{info_panel}
-<div class="legend">{legend_items}</div>
 <script>
 (function () {{
   var wrap = document.getElementById('canvas-wrap');
-  var svg = document.getElementById('diagram');
   var viewport = document.getElementById('viewport');
+  var zoomReadout = document.getElementById('zoom-readout');
   var scale = 1, tx = 0, ty = 0;
   var dragging = false, lastX = 0, lastY = 0;
 
   function apply() {{
     viewport.setAttribute('transform', 'translate(' + tx + ',' + ty + ') scale(' + scale + ')');
+    zoomReadout.textContent = Math.round(scale * 100) + '%';
+  }}
+
+  function setScale(next) {{
+    scale = Math.min(4, Math.max(0.3, next));
+    apply();
   }}
 
   wrap.addEventListener('wheel', function (e) {{
     e.preventDefault();
-    var delta = e.deltaY < 0 ? 1.1 : 0.9;
-    scale = Math.min(4, Math.max(0.3, scale * delta));
-    apply();
+    setScale(scale * (e.deltaY < 0 ? 1.1 : 0.9));
   }}, {{ passive: false }});
 
   wrap.addEventListener('mousedown', function (e) {{
@@ -651,6 +854,12 @@ def render_network_diagram(manifest: Manifest) -> str:
     ty += (e.clientY - lastY);
     lastX = e.clientX; lastY = e.clientY;
     apply();
+  }});
+
+  document.getElementById('zoom-in').addEventListener('click', function () {{ setScale(scale * 1.2); }});
+  document.getElementById('zoom-out').addEventListener('click', function () {{ setScale(scale * 0.8); }});
+  document.getElementById('zoom-reset').addEventListener('click', function () {{
+    scale = 1; tx = 0; ty = 0; apply();
   }});
 }})();
 </script>
