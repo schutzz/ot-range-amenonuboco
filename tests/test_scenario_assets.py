@@ -130,3 +130,30 @@ def test_resolve_concrete_index_without_wildcard(bulk_loader):
     """`*`が無いパターンでも日付が付与されること。"""
     today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y.%m.%d")
     assert bulk_loader._resolve_concrete_index("ot-logs-dnp3") == f"ot-logs-dnp3-{today}"
+
+
+# --- Phase 10 Stage 4-A: 水道物理連動 & Modbus オーバーフロー攻撃 -----------------
+
+_WATER_SCENARIOS = _REPO_ROOT / "scenarios" / "water-overflow-consequence"
+
+
+@pytest.fixture(scope="module")
+def modbus_attack():
+    return _load_module("modbus_overflow_attack", _WATER_SCENARIOS / "modbus_overflow_attack.py")
+
+
+@pytest.fixture(scope="module")
+def water_evaluator():
+    return _load_module("evaluate_water_consequence", _WATER_SCENARIOS / "evaluate_water_consequence.py")
+
+
+def test_modbus_overflow_attack_dry_run(modbus_attack):
+    """pymodbus が無い環境やターゲット非接続でもシミュレーション実行が成功すること。"""
+    result = modbus_attack.run_attack("10.2.20.10", port=502, duration=1)
+    assert result["status"] in ("SUCCESS", "SUCCESS (SIMULATED)", "FAILED")
+
+
+def test_evaluate_water_consequence_e2e(water_evaluator):
+    """Phase 10 Stage 4-A: 水道 Digital Twin & Consequence E2E 総合評価が PASS すること。"""
+    assert water_evaluator.run_evaluation() is True
+

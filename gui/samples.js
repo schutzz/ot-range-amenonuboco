@@ -578,7 +578,7 @@ window.AMENONUBOCO_SAMPLES = [
             "role": "l3-router"
           },
           {
-            "image": "python:3.10-slim",
+            "image": "../protocol-images/modbus",
             "name": "wtp_scada_master",
             "networks": [
               {
@@ -588,15 +588,19 @@ window.AMENONUBOCO_SAMPLES = [
             ],
             "overrides": {
               "cap_add": null,
-              "command": "( python3 -m http.server 8080 & wait )",
-              "environment": [],
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=client",
+                "TARGET=10.2.20.10",
+                "INTERVAL=2"
+              ],
               "ports": [],
               "sysctls": null
             },
             "role": "ot-asset"
           },
           {
-            "image": "python:3.10-slim",
+            "image": "../protocol-images/modbus",
             "name": "pump_a_plc",
             "networks": [
               {
@@ -606,7 +610,7 @@ window.AMENONUBOCO_SAMPLES = [
             ],
             "overrides": {
               "cap_add": null,
-              "command": "( python3 -m http.server 502 & wait )",
+              "command": "( MODE=server LABEL=pump_a_plc python3 /app/run.py &\n  python3 /app/tank_level.py &\n  wait )\n",
               "environment": [],
               "ports": [],
               "sysctls": null
@@ -732,6 +736,24 @@ window.AMENONUBOCO_SAMPLES = [
               "sysctls": null
             },
             "role": "structurer"
+          },
+          {
+            "image": "grafana/grafana:10.4.0",
+            "name": "grafana_server",
+            "networks": [
+              {
+                "ip": "10.2.10.30",
+                "segment": "wtp_cc_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": null,
+              "environment": [],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "visualization-engine"
           }
         ],
         "routing": {

@@ -1,0 +1,149 @@
+{
+  "title": "Water Utility: Physical Consequence (Tank Level & Overflow)",
+  "uid": "water-tank-consequence",
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Tank Water Level (%) & Critical Overflow Threshold",
+      "description": "Modbus レジスタ 40001 (水位センサ) の時系列推移。ポンプ強制稼働による 100% (オーバーフロー閾値) 超過を可視化。",
+      "gridPos": { "h": 10, "w": 16, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 120,
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 20 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 80, "color": "yellow" },
+              { "value": 100, "color": "red" }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "query": "_index:ot-logs-modbus-* AND modbus.reg_num:40001",
+          "timeField": "@timestamp",
+          "metrics": [{ "id": "1", "type": "avg", "field": "modbus.reg_val" }],
+          "bucketAggs": [
+            {
+              "id": "2",
+              "type": "date_histogram",
+              "field": "@timestamp",
+              "settings": { "interval": "auto" }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Current Tank Level",
+      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 80, "color": "yellow" },
+              { "value": 100, "color": "red" }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "_index:ot-logs-modbus-* AND modbus.reg_num:40001",
+          "timeField": "@timestamp",
+          "metrics": [{ "id": "1", "type": "avg", "field": "modbus.reg_val" }],
+          "bucketAggs": [
+            {
+              "id": "2",
+              "type": "date_histogram",
+              "field": "@timestamp",
+              "settings": { "interval": "auto" }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Pump Actuator State (Reg 40002)",
+      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 5 },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "OFF (Normal)", "color": "blue" }, "1": { "text": "FORCED ON (Attack)", "color": "red" } } }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "value": null, "color": "blue" }, { "value": 1, "color": "red" }]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "_index:ot-logs-modbus-* AND modbus.reg_num:40002",
+          "timeField": "@timestamp",
+          "metrics": [{ "id": "1", "type": "max", "field": "modbus.reg_val" }],
+          "bucketAggs": [
+            {
+              "id": "2",
+              "type": "date_histogram",
+              "field": "@timestamp",
+              "settings": { "interval": "auto" }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Modbus Event Stream (Structured via tshark)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 10 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "query": "_index:ot-logs-modbus-*",
+          "timeField": "@timestamp",
+          "metrics": [{ "id": "1", "type": "raw_data" }],
+          "bucketAggs": []
+        }
+      ]
+    }
+  ]
+}

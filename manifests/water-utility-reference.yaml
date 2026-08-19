@@ -14,7 +14,14 @@ topology:
   segments:
     - { name: wtp_cc_lan,          cidr: 10.2.10.0/24,  kind: it-core }
     - { name: wan_link,            cidr: 172.19.0.0/24, kind: wan-edge }
-    - { name: pump_station_a_lan,  cidr: 10.2.20.0/24,  kind: ot-lan }
+    - name: pump_station_a_lan
+      cidr: 10.2.20.0/24
+      kind: ot-lan
+      # Phase 10 決定事項#144/#153: ポンプ場Aへのバックホール回線劣化 (下り方向のみ)
+      impairment:
+        delay: "80ms"
+        jitter: "15ms"
+        loss: "0.5%"
     - { name: pump_station_b_lan,  cidr: 10.2.30.0/24,  kind: ot-lan }
     - { name: remote_access_dmz,   cidr: 10.2.40.0/24,  kind: dmz }
     - { name: mirror_link,         cidr: 10.2.99.0/24,  kind: observation }
@@ -33,26 +40,43 @@ topology:
         - { segment: mirror_link,        ip: 10.2.99.254 }
 
     - name: wtp_scada_master
-      # 中央浄水場のSCADA/historian。プロセス値集約の中枢だが、本実演では
-      # トポロジ上の存在証明のみ(実プロトコル実装は対象外、電力のhistorianと
-      # 同型の最小リスナー)。
+      # 中央浄水場のSCADA/historian。Phase 10 (決定事項#146/#152): pump_a_plc の
+      # 物理プロセス(tank_level)を中央から定期的に読みに行くポーリング役(Modbus client)。
+      # 別セグメント(wtp_cc_lan)からwan_routerを経由してModbus通信を行うため、
+      # ゲートウェイ上のミラーリング(tc)によりtshark構造化パイプラインへ到達する。
       role: ot-asset
-      image: python:3.10-slim
+      image: ../protocol-images/modbus
       networks:
         - { segment: wtp_cc_lan, ip: 10.2.10.10 }
       overrides:
-        command: "( python3 -m http.server 8080 & wait )"
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=client"
+          - "TARGET=10.2.20.10"
+          - "INTERVAL=2"
 
     - name: pump_a_plc
-      # ポンプ場AのPLC(Aliquippa型シナリオ用、補助・比較材料。
-      # Phase7-draft-DeepDive-Water.md §4の案A)。Modbus/TCP既定ポート502の
-      # 最小リスナー(実Modbusサーバ実装は対象外、電力のcc_scada_masterと同型)。
+      # ポンプ場AのPLC(Digital Twin: 水位タンクモデル連動、決定事項#146/#147)。
+      # Modbus/TCP サーバ本体と物理計算プロセス(tank_level.py)の2プロセスが並行稼働。
+      # ポンプ制御レジスタ(40002)がONになると水位が上昇し、100%超過でOVERFLOWが発生。
       role: ot-asset
-      image: python:3.10-slim
+      image: ../protocol-images/modbus
       networks:
         - { segment: pump_station_a_lan, ip: 10.2.20.10 }
       overrides:
-        command: "( python3 -m http.server 502 & wait )"
+        command: |
+          ( MODE=server LABEL=pump_a_plc python3 /app/run.py &
+            python3 /app/tank_level.py &
+            wait )
+      physical_process:
+        type: "tank_level"
+        initial_level: 50.0
+        capacity: 100.0
+        update_interval: "0.5s"
+        bind_registers:
+          level_sensor: 40001
+          pump_control: 40002
+        observed_by: wtp_scada_master  # 必須(決定事項#152)。別セグメント配置必須
 
     - name: pump_b_hmi
       # ポンプ場BのHMI。Oldsmar型主軸実演の標的。Xvfb(仮想フレームバッファ)+
@@ -161,6 +185,13 @@ topology:
         - { segment: mirror_link,  ip: 10.2.99.60 }
         - { segment: wtp_cc_lan,   ip: 10.2.10.60 }
 
+    - name: grafana_server
+      # Phase 10 Stage 4-A: 水位変動・オーバーフロー(Consequence)の時系列可視化。
+      role: visualization-engine
+      image: grafana/grafana:10.4.0
+      networks:
+        - { segment: wtp_cc_lan, ip: 10.2.10.30 }
+
 instrumentation:
   mirror_to: mirror_link
   exclude: []
@@ -169,4 +200,11 @@ structuring:
   engine: tshark
   protocols:
     - { name: vnc,    output_index: ot-logs-vnc-*  }  # Oldsmar型主軸実演。決定事項#101(vnc.key_down==1でのキー抽出)の実証対象
-    - { name: modbus, output_index: ot-logs-modbus-* }  # Aliquippa型(補助)。pump_a_plcは現状プレースホルダのため実トラフィックは無し(電力のopcua同様、将来拡張の宣言)
+    - { name: modbus, output_index: ot-logs-modbus-* }  # Phase 10: pump_a_plc 物理プロセス(Digital Twin)および wtp_scada_master によるポーリングの実トラフィックを構造化
+
+visualization:
+  # Phase 10: 水処理タンクの水位上昇・オーバーフロー(Consequence)を可視化するダッシュボード
+  engine: grafana
+  host: grafana_server
+  dashboards:
+    - ../scenarios/water-overflow-consequence/dashboards/water_tank_consequence.json

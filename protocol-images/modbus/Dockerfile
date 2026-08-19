@@ -19,6 +19,7 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninte
 RUN pip install --no-cache-dir "pymodbus==3.6.9"
 
 COPY run.py /app/run.py
+COPY tank_level.py /app/tank_level.py
 
 # 資産の起動コマンド(overrides.command)を書かない場合の既定。
 CMD ["python3", "/app/run.py"]
