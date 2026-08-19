@@ -271,6 +271,39 @@ class TestImpairmentCommandGeneration:
 
 
 # ===========================================================================
+# Stage 2: Compose Wiring テスト (Pitfall 防止用)
+# ===========================================================================
+
+class TestComposeWiring:
+    """生成された impairment コマンドが compose の command に配線されるかのテスト。"""
+
+    def test_compose_wiring_impairment(self):
+        """マニフェストから compose を生成した際、ゲートウェイの command に tc-netem が含まれる。"""
+        from generators.compose import generate_compose
+        from schema import RolePresets
+        
+        manifest = _validate(_m(impair_seg="sub_a_lan"))
+        presets = RolePresets(
+            roles={
+                "l3-router": {"cap_add": ["NET_ADMIN"]},
+                "ot-asset": {},
+                "observer": {},
+            }
+        )
+        compose = generate_compose(manifest, presets)
+        
+        gw_service = compose["services"]["gateway"]
+        assert "command" in gw_service
+        cmd_str = gw_service["command"]
+        
+        # ゲートウェイの command に netem と tc コマンドが含まれていること
+        assert "netem" in cmd_str
+        assert "delay 100ms 20ms" in cmd_str
+        assert "loss 1.5%" in cmd_str
+        assert "GW_IF=" in cmd_str
+
+
+# ===========================================================================
 # Stage 3: Physical Engine (tank_level) のユニットテスト
 # ===========================================================================
 

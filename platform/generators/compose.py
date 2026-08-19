@@ -32,6 +32,7 @@ from .attack import (
     caldera_volume_mounts,
     generate_agent_commands,
 )
+from .impairment import generate_impairment_commands_with_cidr
 from .mirroring import MirroringGenerationError, generate_mirroring_commands
 from .plugins import (
     PluginGenerationError,
@@ -132,6 +133,7 @@ def _assemble_command(
     plugin_cmds: list[str] | None = None,
     agent_cmds: list[str] | None = None,
     visualization_cmds: list[str] | None = None,
+    impairment_cmds: list[str] | None = None,
 ) -> str | None:
     """各層のコマンド列を1本のshellコマンドに合成する。
 
@@ -155,6 +157,7 @@ def _assemble_command(
     plugin_cmds = plugin_cmds or []
     agent_cmds = agent_cmds or []
     visualization_cmds = visualization_cmds or []
+    impairment_cmds = impairment_cmds or []
 
     if (
         not app_command
@@ -162,14 +165,16 @@ def _assemble_command(
         and not plugin_cmds
         and not agent_cmds
         and not visualization_cmds
+        and not impairment_cmds
     ):
         return None
 
     parts: list[str] = []
-    if mirroring_cmds or routing_cmds or structuring_cmds:
+    if mirroring_cmds or routing_cmds or structuring_cmds or impairment_cmds:
         parts.append(_INSTALL_IPROUTE2)
         parts.extend(mirroring_cmds)
         parts.extend(routing_cmds)
+        parts.extend(impairment_cmds)
     if app_command:
         parts.append(app_command)
     parts.extend(structuring_cmds)
@@ -230,6 +235,28 @@ def _mirroring_commands_for_asset(
     if "NET_ADMIN" not in resolved_cap_add:
         return []
     return generate_mirroring_commands(topology, instrumentation)
+
+
+def _impairment_commands_for_asset(
+    asset: Asset,
+    topology: Topology,
+    manifest: Manifest,
+    resolved_cap_add: list[str],
+) -> list[str]:
+    """回線劣化(impairment)設定は、この資産がゲートウェイであり、かつ実際に
+    NET_ADMINを保持している場合にのみ算出する。
+    (ミラーリング・ルーティングと同じ考え方)
+    """
+    if topology.routing is None or asset.name != topology.routing.gateway:
+        return []
+    if "NET_ADMIN" not in resolved_cap_add:
+        return []
+    
+    cmds: list[str] = []
+    segment_cmds_map = generate_impairment_commands_with_cidr(manifest)
+    for seg_cmds in segment_cmds_map.values():
+        cmds.extend(seg_cmds)
+    return cmds
 
 
 def _structuring_commands_for_asset(
@@ -352,9 +379,12 @@ def _service_block(
         if visualization_overlay is not None and visualization_overlay.command
         else []
     )
+    impairment_cmds = _impairment_commands_for_asset(
+        asset, topology, manifest, resolved.cap_add
+    )
     has_own_startup = bool(resolved.command) or bool(structuring_cmds) or bool(
         plugin_cmds
-    ) or bool(agent_cmds) or bool(visualization_cmds)
+    ) or bool(agent_cmds) or bool(visualization_cmds) or bool(impairment_cmds)
 
     # ルーティング・ミラーリングは、①自前の起動コマンドを持ち、かつ②実際に
     # NET_ADMINを保持している資産にのみ算出する。NET_ADMINが無いと`ip route
@@ -375,6 +405,7 @@ def _service_block(
         plugin_cmds,
         agent_cmds,
         visualization_cmds,
+        impairment_cmds,
     )
     if command:
         service["command"] = command

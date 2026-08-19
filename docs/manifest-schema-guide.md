@@ -76,6 +76,10 @@ topology:
     - name: sub_b_lan
       cidr: 10.0.30.0/24
       kind: ot-lan
+      impairment:
+        delay: 80ms
+        jitter: 15ms
+        loss: 0.5%
     - name: mirror_link
       cidr: 10.0.99.0/24
       kind: observation
@@ -86,6 +90,7 @@ topology:
 | `name` | ✅ | セグメント名（資産の接続先として参照される） |
 | `cidr` | ✅ | サブネット |
 | `kind` | ✅ | セグメント種別（§5.1の語彙）。ネットワーク図の色分けと観測カバレッジ判定に使う |
+| `impairment` | ✕ | セグメントへの回線劣化（tc-netem）指定（`delay`, `jitter`, `loss`, `rate` を指定可能。下り方向のみ適用される） |
 
 ### 2.2 資産（`assets`）
 
@@ -109,6 +114,20 @@ topology:
         - { segment: sub_b_lan,    ip: 10.0.30.254 }
         - { segment: mirror_link,  ip: 10.0.99.254 }
 
+    # Digital Twin 用の物理プロセスエンジン（Phase 10）
+    - name: water_plc
+      role: ot-asset
+      image: ../protocol-images/modbus
+      networks:
+        - { segment: sub_b_lan, ip: 10.0.30.15 }
+      physical_process:
+        type: tank_level
+        initial_level: 50.0
+        capacity: 100.0
+        update_interval: 0.5s
+        bind_registers: { level_sensor: 40001, pump_control: 40002 }
+        observed_by: cc_scada_master
+
     # IP動的割当（ip を省略するとプロビジョナが割り当てる）
     - name: es_enrich_refresher
       role: detection-infra
@@ -124,6 +143,7 @@ topology:
 | `image` | ✅ | 既存イメージ名（例 `python:3.10-slim`）、または**ローカルのDockerfileを指すパス**（下記） |
 | `networks` | ✅ | **接続するセグメントの配列**（マルチホーム対応）。各要素は `segment`（必須）と `ip`（任意、省略時は動的割当） |
 | `overrides` | ✕ | ロールのプリセットを上書きする例外設定（§2.4） |
+| `physical_process` | ✕ | Digital Twin 用の物理プロセス指定（`type`, `initial_level`, `capacity`, `update_interval`, `bind_registers`, `observed_by` を指定可能。`observed_by` には自資産と別セグメントに属する観測資産名を指定） |
 
 > **重要：`networks` は必ず配列**。単一接続でも配列で書きます。前身 `ot-ids-verum` の `wan_router`（5接続）や攻撃者ノード（2接続）のようなマルチホームを、例外扱いせず一貫して表現するためです。
 
