@@ -1,0 +1,170 @@
+# 天沼矛(Amenonuboco) Phase9 Stage3: 通信分野の器。
+#
+# 3分野(電力・上下水道・重要製造業)のような攻撃・検知の実演は持たない。
+# topology + instrumentation + structuring の3層のみ。
+#
+# 通信事業者網は、①装置そのものの管理(SNMP)と②その上を流れる加入者の
+# サービス(SIP)という、**性質の異なる2つの平面が同じ物理網に重なる**構造を
+# 持つ。前者は運用者の通信、後者は利用者の通信であり、観測する側にとっては
+# 「守る対象」も「見てよい範囲」も異なる。この器では両方を並べて置き、
+# 構造化の出力先も分けている。
+#
+# 資産の中身は protocol-images/ の再利用可能なプロトコル実装
+# (使い方は docs/protocol-assets.md)。**サーバ役とクライアント役は必ず
+# 別セグメントへ置く**——ミラーリングはゲートウェイのingressで行うため、
+# 同一セグメント内で完結する通信はゲートウェイを通らず、観測されない。
+apiVersion: amenonuboco/v1alpha1
+kind: CyberRange
+metadata:
+  name: telecom-core-reference
+  description: 通信分野の器。通信事業者網(コア・アクセス・OSS/NMS)をSNMPとSIPで構成する
+
+topology:
+  segments:
+    - { name: corp_it_lan,        cidr: 10.6.10.0/24, kind: it-core }
+    - { name: oss_lan,            cidr: 10.6.15.0/24, kind: dmz }
+    - { name: core_transport_lan, cidr: 10.6.20.0/24, kind: ot-lan }
+    - { name: access_edge_lan,    cidr: 10.6.30.0/24, kind: ot-lan }
+    - { name: mirror_link,        cidr: 10.6.99.0/24, kind: observation }
+  routing:
+    gateway: wan_router
+  assets:
+    - name: wan_router
+      role: l3-router
+      image: debian:bullseye-slim
+      networks:
+        - { segment: corp_it_lan,        ip: 10.6.10.254 }
+        - { segment: oss_lan,            ip: 10.6.15.254 }
+        - { segment: core_transport_lan, ip: 10.6.20.254 }
+        - { segment: access_edge_lan,    ip: 10.6.30.254 }
+        - { segment: mirror_link,        ip: 10.6.99.254 }
+
+    # --- 管理平面: 装置の管理インターフェース(機器役) -------------------------
+    #
+    # コミュニティ文字列は既定のまま(public)にしてある。SNMPv1/v2cは
+    # 認証情報を平文で送るため、観測すればそのまま見える——初期設定を
+    # 変更しないまま運用され続ける管理インターフェースという、繰り返し
+    # 問題になっている構図をそのまま再現するための設定。
+    #
+    # プロトコル資産には必ず overrides.command を書く(理由は
+    # chemical-plant-reference.yaml の同じ位置のコメントを参照)。
+    - name: core_router_mgmt
+      role: ot-asset
+      image: ../protocol-images/snmp
+      networks:
+        - { segment: core_transport_lan, ip: 10.6.20.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=agent"
+          - "LABEL=core_router"
+          - "SYSNAME=core-router-01"
+          - "SYSLOCATION=Core Site A"
+
+    - name: edge_access_node_mgmt
+      role: ot-asset
+      image: ../protocol-images/snmp
+      networks:
+        - { segment: access_edge_lan, ip: 10.6.30.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=agent"
+          - "LABEL=edge_node"
+          - "SYSNAME=access-node-07"
+          - "SYSLOCATION=Edge Site B"
+
+    # --- 管理平面: OSS/NMS(監視役) -------------------------------------------
+    - name: nms_core_poller
+      role: ot-asset
+      image: ../protocol-images/snmp
+      networks:
+        - { segment: oss_lan, ip: 10.6.15.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=poller"
+          - "LABEL=nms_core"
+          - "TARGET=10.6.20.10"
+          - "INTERVAL=5"
+
+    - name: nms_edge_poller
+      role: ot-asset
+      image: ../protocol-images/snmp
+      networks:
+        - { segment: oss_lan, ip: 10.6.15.11 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=poller"
+          - "LABEL=nms_edge"
+          - "TARGET=10.6.30.10"
+          - "INTERVAL=7"
+
+    # --- サービス平面: 音声呼(SIP) -------------------------------------------
+    #
+    # レジストラは認証を要求しない。認証の無いSIPサービスが到達可能という
+    # 状態自体がこの分野で描きたい構図であり、また平文であることが
+    # 観測の前提でもある。
+    - name: softswitch
+      role: ot-asset
+      image: ../protocol-images/sip
+      networks:
+        - { segment: core_transport_lan, ip: 10.6.20.20 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=uas"
+          - "LABEL=softswitch"
+          - "USER=pbx"
+
+    - name: subscriber_phone
+      role: ot-asset
+      image: ../protocol-images/sip
+      networks:
+        - { segment: access_edge_lan, ip: 10.6.30.20 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=uac"
+          - "LABEL=subscriber"
+          - "TARGET=10.6.20.20"
+          - "USER=phone1"
+          - "INTERVAL=10"
+
+    # --- 観測・検知基盤 -------------------------------------------------------
+    - name: elasticsearch
+      role: detection-infra
+      image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+      networks:
+        - { segment: corp_it_lan, ip: 10.6.10.40 }
+      overrides:
+        environment:
+          - "discovery.type=single-node"
+          - "xpack.security.enabled=false"
+          - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+
+    - name: tap_observer
+      role: observer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link }
+      overrides:
+        command: "apt-get update -qq && apt-get install -y -qq tcpdump >/dev/null 2>&1 && tcpdump -i eth0 -nn"
+
+    - name: log_structurer
+      role: structurer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link, ip: 10.6.99.60 }
+        - { segment: corp_it_lan, ip: 10.6.10.60 }
+
+instrumentation:
+  mirror_to: mirror_link
+  exclude: []
+
+structuring:
+  engine: tshark
+  protocols:
+    - { name: snmp, output_index: ot-logs-snmp-* }  # 管理平面(装置の管理インターフェース)
+    - { name: sip,  output_index: ot-logs-sip-* }   # サービス平面(加入者の音声呼)

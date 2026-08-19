@@ -1,0 +1,177 @@
+# 天沼矛(Amenonuboco) Phase9 Stage3: 医療分野の器。
+#
+# 3分野(電力・上下水道・重要製造業)のような攻撃・検知の実演は持たない。
+# topology + instrumentation + structuring の3層のみ。
+#
+# 病院network の特徴は、**患者情報そのものが平文でネットワークを流れる**点に
+# ある。DICOM も HL7 v2 も、暗号化を前提とせずに設計され、現在も平文で
+# 運用されている構成が広く残る。観測する側から見れば「見えすぎる」網であり、
+# 計装を入れること自体が取り扱いの問題を生む——この分野を器として持つことの
+# 意味は、そこにある。
+#
+# **この器が扱うデータはすべて合成である。** 患者名は
+# `SYNTHETIC^RANGE-PATIENT`、患者IDは `RANGE-nnnn` に固定してあり、
+# 実在しないことが一目で分かる値しか流れない。画像データも持たない。
+#
+# 資産の中身は protocol-images/ の再利用可能なプロトコル実装
+# (使い方は docs/protocol-assets.md)。**サーバ役とクライアント役は必ず
+# 別セグメントへ置く**——ミラーリングはゲートウェイのingressで行うため、
+# 同一セグメント内で完結する通信はゲートウェイを通らず、観測されない。
+apiVersion: amenonuboco/v1alpha1
+kind: CyberRange
+metadata:
+  name: hospital-network-reference
+  description: 医療分野の器。病院network(画像系・電子カルテ・生体モニタ)をDICOMとHL7で構成する
+
+topology:
+  segments:
+    - { name: corp_it_lan,  cidr: 10.9.10.0/24, kind: it-core }
+    - { name: clinical_lan, cidr: 10.9.20.0/24, kind: ot-lan }
+    - { name: imaging_lan,  cidr: 10.9.30.0/24, kind: ot-lan }
+    - { name: biomed_lan,   cidr: 10.9.40.0/24, kind: ot-lan }
+    - { name: mirror_link,  cidr: 10.9.99.0/24, kind: observation }
+  routing:
+    gateway: wan_router
+  assets:
+    - name: wan_router
+      role: l3-router
+      image: debian:bullseye-slim
+      networks:
+        - { segment: corp_it_lan,  ip: 10.9.10.254 }
+        - { segment: clinical_lan, ip: 10.9.20.254 }
+        - { segment: imaging_lan,  ip: 10.9.30.254 }
+        - { segment: biomed_lan,   ip: 10.9.40.254 }
+        - { segment: mirror_link,  ip: 10.9.99.254 }
+
+    # --- 診療情報系(受け手) ---------------------------------------------------
+    #
+    # プロトコル資産には必ず overrides.command を書く(理由は
+    # chemical-plant-reference.yaml の同じ位置のコメントを参照)。
+    - name: pacs_server
+      # PACS(医用画像管理システム)。モダリティから画像を受け取り保管する。
+      # DICOMのウェルノウンポート104で待ち受ける——tsharkのDICOMディセクタは
+      # 既定でこのポートに紐づくため、別ポートにすると「TCPとしては見えるが
+      # DICOMとして構造化されない」状態になる。
+      role: ot-asset
+      image: ../protocol-images/dicom
+      networks:
+        - { segment: clinical_lan, ip: 10.9.20.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=scp"
+          - "LABEL=pacs"
+          - "AE_TITLE=RANGE_PACS"
+
+    - name: emr_server
+      # 電子カルテ。入院登録(ADT)・検査結果(ORU)をHL7 v2 over MLLPで受ける。
+      role: ot-asset
+      image: ../protocol-images/hl7
+      networks:
+        - { segment: clinical_lan, ip: 10.9.20.11 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=receiver"
+          - "LABEL=emr"
+          - "APP=EMR"
+
+    # --- 画像系(送り手) -------------------------------------------------------
+    - name: ct_scanner
+      role: ot-asset
+      image: ../protocol-images/dicom
+      networks:
+        - { segment: imaging_lan, ip: 10.9.30.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=scu"
+          - "LABEL=ct"
+          - "TARGET=10.9.20.10"
+          - "AE_TITLE=RANGE_CT"
+          - "PEER_AE=RANGE_PACS"
+          - "INTERVAL=6"
+
+    - name: mr_scanner
+      role: ot-asset
+      image: ../protocol-images/dicom
+      networks:
+        - { segment: imaging_lan, ip: 10.9.30.11 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=scu"
+          - "LABEL=mr"
+          - "TARGET=10.9.20.10"
+          - "AE_TITLE=RANGE_MR"
+          - "PEER_AE=RANGE_PACS"
+          - "INTERVAL=9"
+
+    # --- 生体情報系(送り手) ---------------------------------------------------
+    - name: patient_monitor
+      # ベッドサイドの生体モニタ。心拍・SpO2を検査結果メッセージとして送る。
+      role: ot-asset
+      image: ../protocol-images/hl7
+      networks:
+        - { segment: biomed_lan, ip: 10.9.40.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=sender"
+          - "LABEL=monitor"
+          - "TARGET=10.9.20.11"
+          - "APP=MONITOR"
+          - "INTERVAL=5"
+
+    - name: lab_analyzer
+      # 検体検査装置。同じくHL7で結果を電子カルテへ返す。
+      role: ot-asset
+      image: ../protocol-images/hl7
+      networks:
+        - { segment: biomed_lan, ip: 10.9.40.11 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=sender"
+          - "LABEL=lab"
+          - "TARGET=10.9.20.11"
+          - "APP=LAB"
+          - "INTERVAL=8"
+
+    # --- 観測・検知基盤 -------------------------------------------------------
+    - name: elasticsearch
+      role: detection-infra
+      image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+      networks:
+        - { segment: corp_it_lan, ip: 10.9.10.40 }
+      overrides:
+        environment:
+          - "discovery.type=single-node"
+          - "xpack.security.enabled=false"
+          - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+
+    - name: tap_observer
+      role: observer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link }
+      overrides:
+        command: "apt-get update -qq && apt-get install -y -qq tcpdump >/dev/null 2>&1 && tcpdump -i eth0 -nn"
+
+    - name: log_structurer
+      role: structurer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link, ip: 10.9.99.60 }
+        - { segment: corp_it_lan, ip: 10.9.10.60 }
+
+instrumentation:
+  mirror_to: mirror_link
+  exclude: []
+
+structuring:
+  engine: tshark
+  protocols:
+    # 表示フィルタ名は dcm ではなく dicom(罠ログ#033)。
+    - { name: dicom, output_index: ot-logs-dicom-* }  # 画像系(モダリティ→PACS)
+    - { name: hl7,   output_index: ot-logs-hl7-* }    # 診療情報系(ADT/ORU)

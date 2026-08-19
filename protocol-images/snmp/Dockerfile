@@ -9,9 +9,14 @@
 # パッケージ配信状況にも依存する。イメージへ焼くことで再現性が上がる。
 FROM debian:bookworm-slim
 
+# iproute2 を同梱する。生成される起動コマンドは、資産が直接接続していない
+# セグメントへの `ip route add` を含む(これが無いと通信はDockerの既定
+# ゲートウェイを迂回し、ゲートウェイ上のミラーリングに乗らない＝観測
+# されない)。同梱しておくと起動時のapt-getを丸ごと省略でき、レンジの
+# 立ち上がりが速くなり、パッケージ配信への依存も無くなる。
 RUN DEBIAN_FRONTEND=noninteractive apt-get update -qq && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-        snmpd snmp python3 >/dev/null 2>&1 && \
+        snmpd snmp python3 iproute2 >/dev/null 2>&1 && \
     rm -rf /var/lib/apt/lists/*
 
 COPY run.py /app/run.py

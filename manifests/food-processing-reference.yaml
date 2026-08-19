@@ -1,0 +1,165 @@
+# 天沼矛(Amenonuboco) Phase9 Stage3: 食品・農業分野の器。
+#
+# 3分野(電力・上下水道・重要製造業)のような攻撃・検知の実演は持たない。
+# topology + instrumentation + structuring の3層のみ。
+#
+# 食品工場の特徴は、**「止まること」より「気づかれずにずれること」の方が
+# 深刻**な点にある。充填量・冷蔵温度・CIP洗浄の薬液濃度はいずれも
+# プロセス値であり、改ざんされても設備は正常に動き続ける。この器では
+# それらの値が実際にネットワークを流れる状態を作っている。
+#
+# 資産の中身は protocol-images/ の再利用可能なプロトコル実装
+# (使い方は docs/protocol-assets.md)。**サーバ役とクライアント役は必ず
+# 別セグメントへ置く**——ミラーリングはゲートウェイのingressで行うため、
+# 同一セグメント内で完結する通信はゲートウェイを通らず、観測されない。
+apiVersion: amenonuboco/v1alpha1
+kind: CyberRange
+metadata:
+  name: food-processing-reference
+  description: 食品・農業分野の器。食品工場(充填ライン・冷蔵倉庫・CIP洗浄)をModbus/TCPとOPC UAで構成する
+
+topology:
+  segments:
+    - { name: corp_it_lan,      cidr: 10.8.10.0/24, kind: it-core }
+    - { name: mes_dmz,          cidr: 10.8.15.0/24, kind: dmz }
+    - { name: filling_line_lan, cidr: 10.8.20.0/24, kind: ot-lan }
+    - { name: cold_storage_lan, cidr: 10.8.30.0/24, kind: ot-lan }
+    - { name: cip_lan,          cidr: 10.8.40.0/24, kind: ot-lan }
+    - { name: mirror_link,      cidr: 10.8.99.0/24, kind: observation }
+  routing:
+    gateway: wan_router
+  assets:
+    - name: wan_router
+      role: l3-router
+      image: debian:bullseye-slim
+      networks:
+        - { segment: corp_it_lan,      ip: 10.8.10.254 }
+        - { segment: mes_dmz,          ip: 10.8.15.254 }
+        - { segment: filling_line_lan, ip: 10.8.20.254 }
+        - { segment: cold_storage_lan, ip: 10.8.30.254 }
+        - { segment: cip_lan,          ip: 10.8.40.254 }
+        - { segment: mirror_link,      ip: 10.8.99.254 }
+
+    # --- 生産設備(機器役) -----------------------------------------------------
+    #
+    # プロトコル資産には必ず overrides.command を書く(理由は
+    # chemical-plant-reference.yaml の同じ位置のコメントを参照)。
+    - name: filler_plc
+      # 充填機のPLC。充填量の設定値と実績値を保持レジスタとして持つ。
+      role: ot-asset
+      image: ../protocol-images/modbus
+      networks:
+        - { segment: filling_line_lan, ip: 10.8.20.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=server"
+          - "LABEL=filler_plc"
+          - "REGISTERS=32"
+
+    - name: cold_storage_plc
+      # 冷蔵倉庫のPLC。庫内温度・除霜サイクルを持つ。温度が静かにずれる形の
+      # 改ざんは、製品が出荷された後まで気づかれない種類の被害になる。
+      role: ot-asset
+      image: ../protocol-images/modbus
+      networks:
+        - { segment: cold_storage_lan, ip: 10.8.30.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=server"
+          - "LABEL=cold_storage"
+          - "REGISTERS=16"
+
+    - name: cip_skid
+      # CIP(定置洗浄)スキッド。洗浄薬液の濃度・温度・時間をOPC UAで公開する。
+      role: ot-asset
+      image: ../protocol-images/opcua
+      networks:
+        - { segment: cip_lan, ip: 10.8.40.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=server"
+          - "LABEL=cip_skid"
+
+    # --- MES/DMZ層(監視役) ----------------------------------------------------
+    #
+    # 3系統の監視をいずれもMES側のDMZに置く。実際の工場でも、上位の生産管理が
+    # 現場の値を直接読みに行く構成は珍しくなく、IT側からOT側へ降りる経路が
+    # 常時開いた状態になる——この器で観測したい構図そのもの。
+    - name: line_supervisor
+      role: ot-asset
+      image: ../protocol-images/modbus
+      networks:
+        - { segment: mes_dmz, ip: 10.8.15.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=client"
+          - "LABEL=line_supervisor"
+          - "TARGET=10.8.20.10"
+          - "INTERVAL=5"
+
+    - name: cold_chain_monitor
+      role: ot-asset
+      image: ../protocol-images/modbus
+      networks:
+        - { segment: mes_dmz, ip: 10.8.15.11 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=client"
+          - "LABEL=cold_chain"
+          - "TARGET=10.8.30.10"
+          - "INTERVAL=8"
+
+    - name: mes_server
+      role: ot-asset
+      image: ../protocol-images/opcua
+      networks:
+        - { segment: mes_dmz, ip: 10.8.15.12 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=client"
+          - "LABEL=mes_server"
+          - "TARGET=10.8.40.10"
+          - "INTERVAL=6"
+
+    # --- 観測・検知基盤 -------------------------------------------------------
+    - name: elasticsearch
+      role: detection-infra
+      image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+      networks:
+        - { segment: corp_it_lan, ip: 10.8.10.40 }
+      overrides:
+        environment:
+          - "discovery.type=single-node"
+          - "xpack.security.enabled=false"
+          - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+
+    - name: tap_observer
+      role: observer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link }
+      overrides:
+        command: "apt-get update -qq && apt-get install -y -qq tcpdump >/dev/null 2>&1 && tcpdump -i eth0 -nn"
+
+    - name: log_structurer
+      role: structurer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link, ip: 10.8.99.60 }
+        - { segment: corp_it_lan, ip: 10.8.10.60 }
+
+instrumentation:
+  mirror_to: mirror_link
+  exclude: []
+
+structuring:
+  engine: tshark
+  protocols:
+    - { name: modbus, output_index: ot-logs-modbus-* }  # 充填ライン・冷蔵倉庫
+    - { name: opcua,  output_index: ot-logs-opcua-* }   # CIP洗浄スキッド
