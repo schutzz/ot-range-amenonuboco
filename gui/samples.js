@@ -22,10 +22,6 @@ window.AMENONUBOCO_SAMPLES = [
         "engine": "tshark",
         "protocols": [
           {
-            "name": "http",
-            "output_index": "ot-logs-http-*"
-          },
-          {
             "name": "dnp3",
             "output_index": "ot-logs-dnp3-*"
           },

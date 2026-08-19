@@ -117,7 +117,10 @@ def test_auto_datasource_combines_structuring_and_signals_pattern(compose):
     content = compose["configs"]["grafana_server_datasources"]["content"]
     doc = yaml.safe_load(content)
     index_pattern = doc["datasources"][0]["jsonData"]["index"]
-    assert "ot-logs-http-*" in index_pattern
+    # Phase9決定事項#140でpower-grid-referenceからhttpエントリを削除した
+    # (es_enrich_refresherとelasticsearchが同一セグメントにあり、
+    # ゲートウェイを経由しない通信は原理的にミラーされ得ないため)。
+    assert "ot-logs-opcua-*" in index_pattern
     assert "ot-logs-dnp3-*" in index_pattern
     assert "ot-signals-*" in index_pattern
     assert doc["datasources"][0]["jsonData"]["timeField"] == "@timestamp"

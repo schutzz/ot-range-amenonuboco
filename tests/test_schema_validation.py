@@ -130,7 +130,13 @@ def test_reject_mirror_to_nonexistent_segment(base_raw):
 
 
 def test_reject_duplicate_protocol_name(base_raw):
-    base_raw["structuring"]["protocols"].append({"name": "http", "output_index": "x-*"})
+    # 既存の最初のprotocolエントリと同名を追加する(Phase9決定事項#140で
+    # power-grid-referenceからhttpエントリを削除したため、固定文字列では
+    # なくフィクスチャの実データから名前を取る)。
+    existing_name = base_raw["structuring"]["protocols"][0]["name"]
+    base_raw["structuring"]["protocols"].append(
+        {"name": existing_name, "output_index": "x-*"}
+    )
     with pytest.raises(ValidationError):
         _validate(base_raw)
 

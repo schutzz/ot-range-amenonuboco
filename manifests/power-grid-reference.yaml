@@ -323,13 +323,32 @@ instrumentation:
   exclude: []
 
 structuring:
-  # Phase3: es_enrich_refresherが常時cc_lan内で生成しているHTTP POSTトラフィック
-  # (elasticsearchへの定期curl)を実証対象に使う。cc_lanは観測対象セグメント
-  # なのでmirror_linkへミラーされ、log_structurerが捕捉してot-logs-http-*へ
-  # 書き込む想定(Phase3決定事項#39・#40)。
+  # 【Phase9決定事項#140で訂正】旧コメントは「es_enrich_refresherが
+  # cc_lan内で生成するHTTP POST(elasticsearchへの定期curl)は、cc_lanが
+  # 観測対象セグメントであるためmirror_linkへミラーされる」と主張して
+  # いたが、これは誤りだった。ミラーリングはゲートウェイの各セグメント
+  # 向けインターフェース上でtc ingressとして設定される(generators/
+  # mirroring.py)ため、**ゲートウェイを経由しない通信(同一セグメント内
+  # の2ノード間、L2で直接スイッチされる)はそもそもゲートウェイの
+  # インターフェースを一度も通過せず、原理的にミラーされ得ない**。
+  # es_enrich_refresherとelasticsearchは共にcc_lan上にあり、両者間の
+  # HTTP POSTはこのケースに該当する。この構造上の制約はPhase9
+  # Stage3・決定事項#137(プロトコル資産のサーバ役とクライアント役を
+  # 別セグメントに置く理由)と同じものであり、実機確認(tap_observerの
+  # 生キャプチャ550パケット中、elasticsearch:9200宛ては0件。
+  # 10分以上・複数回のcurl実行後も`ot-logs-http-*`は0件のまま)で
+  # 裏付けた。cc_scada_master/sub_c_rtu(決定事項#138)と異なり、
+  # es_enrich_refresherの役割上、別セグメントへ移すことは意味を持たない
+  # (Elasticsearchへの内部的な補助リクエストであり、OTプロトコルの
+  # 模擬対象ではない)ため、位置は変更せず、宣言を撤回する。この
+  # index自体は電力の主軸実演(SNMP/DNP3)に不要であり、宣言し続ける
+  # ことは「動かないものを動くように見せる」ことになる(決定事項#128の
+  # 逆)。manufacturing-plant/water-utilityの既存プレースホルダ宣言
+  # (実トラフィック無しと明記済み)とは異なり、こちらは「実際に通信は
+  # 発生しているが構造的に観測不可能」という別種のため、宣言そのものを
+  # 削除する判断とした。
   engine: tshark
   protocols:
-    - { name: http,  output_index: ot-logs-http-* }
     - { name: dnp3,  output_index: ot-logs-dnp3-* }   # Phase5: Signal1(ゾーン逸脱)の実証対象。sub_c_rtuも同一index(1プロトコル=1index、決定事項#39)。Phase9決定事項#138でcc_scada_master/sub_c_rtuを実DNP3化し、許可された送信元からの正当なDNP3(周期Poll)も同じindexへ実際に流れるようになった
     - { name: opcua, output_index: ot-logs-opcua-* }  # Phase7決定事項#106: historian連携。tshark組み込みdissector(軽い器見込み、要実機検証)
     - { name: snmp,  output_index: ot-logs-snmp-* }   # Phase7決定事項#106: cc_ups管理。SNMPは最も成熟したtshark対応
