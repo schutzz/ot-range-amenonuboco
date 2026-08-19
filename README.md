@@ -1,8 +1,12 @@
 # Amenonuboco — Cyber Range as Code
 
-![status](https://img.shields.io/badge/status-Phase%207%20(3%20Sectors%20Verified)-brightgreen)
+![status](https://img.shields.io/badge/status-Phase%209%20(15%20Sectors)-brightgreen)
 
 > **天沼矛（あめのぬぼこ）** — マニフェスト1枚から、OT/ICS向けサイバーレンジ（攻撃対象 + 計装 + 検知パイプライン）を動的にプロビジョニングするためのプラットフォーム。
+
+![電力ネットワーク図（マニフェスト1枚から自動生成した自己完結HTMLのスクリーンショット）](./docs/images/network-diagram-power.png)
+
+マニフェスト1枚（`power-grid-reference.yaml`）から、上のネットワーク図を含む一式（`docker-compose.yml` ＋ 計装 ＋ 構造化パイプライン）がそのまま生成されます。詳細は [3分野の実証](#3分野の実証t字戦略の縦棒深さ) を参照してください。
 
 ## これは何か
 
@@ -192,4 +196,4 @@ pytest          # スキーマ検証・生成物・記法ガイド整合・シ�
 
 ---
 
-🤖 このプロジェクトは [Claude Code](https://claude.com/claude-code) を用いて開発されています。
+🤖 このプロジェクトは [Claude Code](https://claude.com/claude-code) と [Gemini](https://gemini.google.com) を用いて開発されています。
