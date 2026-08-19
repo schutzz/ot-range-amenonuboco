@@ -1,0 +1,164 @@
+# 天沼矛(Amenonuboco) Phase9 Stage4: 輸送分野の器（観測境界を持つ）。
+#
+# 観測できる領域と**構造的に観測できない領域**の両方を持つ器。設計思想の
+# 詳細は nuclear-plant-reference.yaml の冒頭コメントを参照。
+#
+# 鉄道の信号保安系(CBTC等)は、安全性が最優先される専用系で、標準化された
+# オープンプロトコルに乏しくベンダ独自仕様が支配的である。tsharkに
+# dissectorが存在せず、たとえパケットを取れても構造化できない——
+# **「経路が無くて見えない」のではなく「取れても読めない」種類の死角**で
+# あり、原子力(物理的な分離)とは死角の理由が異なる。
+#
+# 一方、駅務設備(空調・照明)と旅客案内は普通のIT/OTプロトコルで動いており、
+# ここは観測できる。同じ事業者の中に、性質の異なる2種類の網が並存する。
+apiVersion: amenonuboco/v1alpha1
+kind: CyberRange
+metadata:
+  name: rail-transit-reference
+  description: 輸送分野の器。駅務・旅客設備系を観測し、信号保安系をdissector不在の死角として描く
+
+topology:
+  segments:
+    - { name: corp_it_lan,         cidr: 10.11.10.0/24, kind: it-core }
+    - { name: station_facility_lan, cidr: 10.11.20.0/24, kind: ot-lan }
+    - { name: passenger_info_lan,  cidr: 10.11.30.0/24, kind: ot-lan }
+    # 死角。ゲートウェイを接続しない。
+    - { name: signalling_lan,      cidr: 10.11.50.0/24, kind: ot-l2 }
+    - { name: mirror_link,         cidr: 10.11.99.0/24, kind: observation }
+  routing:
+    gateway: wan_router
+  assets:
+    - name: wan_router
+      role: l3-router
+      image: debian:bullseye-slim
+      networks:
+        - { segment: corp_it_lan,          ip: 10.11.10.254 }
+        - { segment: station_facility_lan, ip: 10.11.20.254 }
+        - { segment: passenger_info_lan,   ip: 10.11.30.254 }
+        - { segment: mirror_link,          ip: 10.11.99.254 }
+
+    # --- 観測できる領域: 駅務設備(機器役) -------------------------------------
+    - name: station_hvac_controller
+      # 駅舎の空調コントローラ。ホーム・コンコースの環境を制御する。
+      role: ot-asset
+      image: ../protocol-images/bacnet
+      networks:
+        - { segment: station_facility_lan, ip: 10.11.20.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=device"
+          - "LABEL=station_hvac"
+          - "DEVICE_ID=1101"
+
+    - name: platform_display_gateway
+      # ホームの旅客案内表示ゲートウェイ。SNMPで死活・状態を管理される。
+      role: ot-asset
+      image: ../protocol-images/snmp
+      networks:
+        - { segment: passenger_info_lan, ip: 10.11.30.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=agent"
+          - "LABEL=platform_display"
+          - "SYSNAME=platform-display-gw"
+          - "SYSLOCATION=Central Station Platform 3"
+
+    # --- 観測できる領域: 監視役 -----------------------------------------------
+    - name: facility_management_station
+      role: ot-asset
+      image: ../protocol-images/bacnet
+      networks:
+        - { segment: passenger_info_lan, ip: 10.11.30.20 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=client"
+          - "LABEL=facility_mgmt"
+          - "TARGET=10.11.20.10"
+          - "DEVICE_ID=1101"
+          - "INTERVAL=6"
+
+    - name: network_monitoring_station
+      role: ot-asset
+      image: ../protocol-images/snmp
+      networks:
+        - { segment: station_facility_lan, ip: 10.11.20.20 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=poller"
+          - "LABEL=nms"
+          - "TARGET=10.11.30.10"
+          - "INTERVAL=5"
+
+    # --- 死角: 信号保安系 -----------------------------------------------------
+    #
+    # ここに置く資産は overrides.command を持たない(理由は
+    # nuclear-plant-reference.yaml の同じ位置のコメントを参照)。
+    #
+    # 実際のCBTCが使う通信はベンダ独自仕様であり、ここに置いているのは
+    # **通信が存在すること自体を示すための代役**である。死角の中では
+    # どのプロトコルであるかは観測結果に一切影響しない。
+    - name: interlocking_controller
+      # 連動装置。進路の安全を担保する信号保安系の中核。
+      role: ot-asset
+      image: ../protocol-images/modbus
+      networks:
+        - { segment: signalling_lan, ip: 10.11.50.10 }
+      overrides:
+        environment:
+          - "MODE=server"
+          - "LABEL=interlocking"
+
+    - name: wayside_radio_unit
+      # 地上無線装置。車上装置と連動装置の間を仲介する。
+      role: ot-asset
+      image: ../protocol-images/modbus
+      networks:
+        - { segment: signalling_lan, ip: 10.11.50.11 }
+      overrides:
+        environment:
+          - "MODE=client"
+          - "LABEL=wayside_radio"
+          - "TARGET=10.11.50.10"
+          - "INTERVAL=5"
+
+    # --- 観測・検知基盤 -------------------------------------------------------
+    - name: elasticsearch
+      role: detection-infra
+      image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+      networks:
+        - { segment: corp_it_lan, ip: 10.11.10.40 }
+      overrides:
+        environment:
+          - "discovery.type=single-node"
+          - "xpack.security.enabled=false"
+          - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+
+    - name: tap_observer
+      role: observer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link }
+      overrides:
+        command: "apt-get update -qq && apt-get install -y -qq tcpdump >/dev/null 2>&1 && tcpdump -i eth0 -nn"
+
+    - name: log_structurer
+      role: structurer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link, ip: 10.11.99.60 }
+        - { segment: corp_it_lan, ip: 10.11.10.60 }
+
+instrumentation:
+  mirror_to: mirror_link
+  exclude:
+    - signalling_lan
+
+structuring:
+  engine: tshark
+  protocols:
+    - { name: bacapp, output_index: ot-logs-bacnet-* }  # 駅務設備(表示フィルタ名は罠ログ#033)
+    - { name: snmp,   output_index: ot-logs-snmp-* }    # 旅客案内表示の管理
