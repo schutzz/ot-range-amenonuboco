@@ -133,9 +133,17 @@ topology:
 > - name: reactor_plc
 >   role: ot-asset
 >   image: ../protocol-images/modbus     # ../protocol-images/modbus/Dockerfile をビルド
+>   networks:
+>     - { segment: field_instrument_lan, ip: 10.4.30.10 }
 >   overrides:
+>     command: "python3 /app/run.py"     # 明示すること（下記）
 >     environment: [ "MODE=server" ]
 > ```
+>
+> **`overrides.command` は省略しないでください。** イメージ側の `CMD` があるので書かなくてもコンテナは動きますが、書かないと**他セグメントへの経路（`ip route add`）が生成されません**。経路が無くてもDockerの既定ゲートウェイ経由で通信自体は成立してしまうため、「通信は流れているのに、宣言したゲートウェイを通らないので観測されない」という状態になります。
+>
+> 逆に、**ゲートウェイを接続していないセグメント**（エアギャップの表現）に置く資産には、`overrides.command` を書いてはいけません。到達先が無いのに経路を生成しようとして、生成時にエラーになります。
+>
 >
 > 独自のプロトコル実装やシミュレータをコンテナ化して資産に載せたい場合に使います。本リポジトリは、分野をまたいで再利用できるプロトコル実装を [`protocol-images/`](../protocol-images/) に用意しています——使い方は [プロトコル資産の使用法](./protocol-assets.md) を参照してください。
 
