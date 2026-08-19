@@ -1,6 +1,6 @@
 # Amenonuboco — Cyber Range as Code
 
-![status](https://img.shields.io/badge/status-Phase%209.5%20(Hardening%20%26%20Polish)-brightgreen)
+![status](https://img.shields.io/badge/status-Phase%2010%20(Digital%20Twin%20%26%20Impairment)-brightgreen)
 
 > **天沼矛（あめのぬぼこ）** — マニフェスト1枚から、OT/ICS向けサイバーレンジ（攻撃対象 + 計装 + 検知パイプライン）を動的にプロビジョニングするためのプラットフォーム。
 
@@ -173,14 +173,15 @@ python cli.py diagram   ../manifests/manufacturing-plant-reference.yaml
 
 ## ステータス
 
-**Phase 9.5（地盤固め・堅牢化）が完了しました。** 15分野展開（Phase 9）の上に以下の堅牢化を積み上げました。
+**Phase 10（高解像度エミュレーション：Digital Twin ＆ 回線劣化 Impairment）が完了しました。** 15分野の器展開（Phase 9）と堅牢化（Phase 9.5）の上に以下の高度機能を統合しました。
 
-- **構造化パイプラインの Cgroups サンドボックス化**：攻撃トラフィックを処理する `structurer`（tshark）コンテナに CPU・メモリのリソース制限（`deploy.resources.limits`）を設定。悪意あるパケットやディセクタ脆弱性による無限ループ・メモリバーストがホスト全体を道連れにしない構造を確立。
-- **`_ws.malformed` パケット破損メタデータの検知転用**：tshark が解析失敗と判定した破損パケットのログを `ot-logs-malformed-*` インデックスへ集約し、パケット破壊攻撃の兆候として検知パイプラインへ食わせられるようにした。
-- **ONVIF / RTSP SOAP/XML 深掘り構造化**：重要製造業（監視カメラ経由横展開）シナリオの構造化対象に `onvif` プロトコルを追加。カメラ制御（PTZ 操作・認証・ストリーム設定等）の SOAP メッセージレベル抽出を宣言可能にした。
-- **GOOSE パケット複製・再送の補助実演**：電力サブステーション（IEC 61850）向けに、GOOSE メッセージ（EtherType `0x88B8`）を複製・状態番号改ざん・高速再送する補助実演スクリプト（[`scenarios/legacy-power-grid-signals/goose_replay_attack.py`](./scenarios/legacy-power-grid-signals/goose_replay_attack.py)）を追加。
+- **OT 回線劣化エミュレーション（`tc-netem`）**：セグメント定義に `impairment`（delay, jitter, loss, rate）を宣言するだけで、ゲートウェイの下り方向 egress に `tc-netem` および TBF 帯域制限を自動構成。レガシーシリアル変換器や微弱無線の劣悪回線を忠実に再現。
+- **物理プロセス連動（Digital Twin）**：資産定義に `physical_process`（`type: tank_level`, `observed_by: wtp_scada_master` 等）を宣言し、コンテナ内で Modbus サーバと離散時間物理モデルが連動。
+- **物理影響（Consequence）E2E 実証と可視化**：攻撃者による Modbus ポンプ強制 ON ➔ 水位上昇 ➔ 100% 超過（オーバーフロー被害）➔ `ot-logs-modbus-*` 構造化 ➔ Grafana ダッシュボードでの時系列相関可視化を縦通し実証。
+- **観測可能性の強制（決定事項#152 / #154）**：`observed_by` の必須化・別セグメント配置強制、および `mirror_to` セグメントへの `impairment` 禁止をスキーマ（Python）および GUI（JS）双方のバリデーションで保証。
+- **ブラウザ完結 GUI の拡張**：`impairment` および `physical_process` の設定フォームを GUI エディタに統合し、YAML エクスポートおよびパリティテスト（55 件）を完備。
 
-累計テスト件数は **385 件**（367 PASS / 18 SKIP、いずれも正常系）です。スキーマ・生成物・GUI（Python/JSのパリティを含む）・シナリオ資産をカバーする pytest スイートと GitHub Actions CI を継続して整備しています。
+累計テスト件数は **414 件**（396 PASS / 18 SKIP、いずれも正常系）です。スキーマ・生成物・GUI（Python/JSのパリティを含む）・シナリオ資産をカバーする pytest スイートと GitHub Actions CI を継続して整備しています。
 
 ### 開発
 
