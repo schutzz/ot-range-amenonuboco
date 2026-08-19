@@ -14,6 +14,7 @@ elasticsearch に command が生成されないこと等）を含むため残し
 
 from __future__ import annotations
 
+import re
 import shlex
 import subprocess
 from pathlib import Path
@@ -205,6 +206,68 @@ def test_excluded_segments_are_really_unobserved(manifest):
     observed = {s.name for s in manifest.instrumentation.observed_segments(manifest.topology)}
     for name in manifest.instrumentation.exclude:
         assert name not in observed, f"exclude したはずの '{name}' が観測対象に含まれる"
+
+
+def test_assets_on_unrouted_segments_have_no_command(manifest):
+    """ゲートウェイが接続していないセグメント上の資産は、起動コマンドを
+    持たないこと（Phase9 Stage4の観測境界を持つ器）。
+
+    ゲートウェイの無いセグメント＝エアギャップの表現であり、そこに置く資産に
+    他セグメントへの経路は存在しない。にもかかわらず overrides.command を
+    書くと、生成器が「自前の起動コマンドを持つ資産にはルーティングを与える」
+    規則に従って経由先ゲートウェイIPを探し、見つからず生成時に落ちる。
+
+    つまりこの表明が破れているマニフェストは `generate_compose` の時点で
+    既に落ちているが、**なぜ落ちたのかが分かる形で**残しておく。
+    """
+    if manifest.topology.routing is None:
+        pytest.skip("routing を宣言していない")
+    gateway = manifest.topology.asset_by_name(manifest.topology.routing.gateway)
+    reachable = {n.segment for n in gateway.networks}
+
+    offenders = []
+    for asset in manifest.topology.assets:
+        if asset.name == gateway.name or not asset.networks:
+            continue
+        if asset.networks[0].segment in reachable:
+            continue
+        if asset.overrides.command:
+            offenders.append(asset.name)
+    assert not offenders, (
+        f"ゲートウェイ非接続セグメント上の資産が overrides.command を持つ: "
+        f"{offenders}. 経路が存在しない以上、イメージ側のCMDで動かすこと"
+    )
+
+
+def test_excluded_segments_render_as_blind_spots(manifest):
+    """exclude したセグメントが、図の上で死角として描かれること。
+
+    「観測できない領域を隠さず、最も目立つ形で描く」という本プロジェクトの
+    設計思想（Phase0決定事項#6）が、実際の生成物で成立していることの表明。
+    """
+    if manifest.instrumentation is None or not manifest.instrumentation.exclude:
+        pytest.skip("exclude を使っていない")
+    html = render_network_diagram(manifest)
+    observed = {s.name for s in manifest.instrumentation.observed_segments(manifest.topology)}
+
+    for name in manifest.instrumentation.exclude:
+        titles = re.findall(r"<title>([^<]*)</title>", html)
+        matched = [t for t in titles if t.startswith(name + " ")]
+        assert matched, f"死角セグメント '{name}' が図に現れていない"
+        assert all("観測外" in t for t in matched), (
+            f"死角セグメント '{name}' が観測外として描かれていない: {matched}"
+        )
+
+    # 観測対象のセグメントが巻き添えで死角扱いになっていないこと（誤検知の防止）。
+    for name in observed:
+        titles = [
+            t
+            for t in re.findall(r"<title>([^<]*)</title>", html)
+            if t.startswith(name + " ")
+        ]
+        assert all("観測外" not in t for t in titles), (
+            f"観測対象のセグメント '{name}' が死角として描かれている: {titles}"
+        )
 
 
 # --- ローカルビルド参照（image にパスを書く記法） ----------------------------

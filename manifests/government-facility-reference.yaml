@@ -1,0 +1,162 @@
+# 天沼矛(Amenonuboco) Phase9 Stage4: 政府施設分野の器（観測境界を持つ）。
+#
+# 観測できる領域と**構造的に観測できない領域**の両方を持つ器。設計思想の
+# 詳細は nuclear-plant-reference.yaml の冒頭コメントを参照。
+#
+# 庁舎は建物としては商業施設(building-automation-reference.yaml)とほぼ同じ
+# 設備・同じプロトコルで動く。違いは、**同じ建物の中に取り扱い区分の異なる
+# 区画が同居する**点にある。空調・照明・入退室という同種の設備でありながら、
+# 機密取扱区画のそれは分離された系統に載り、観測の対象にならない。
+#
+# 商業施設の器と並べて見ると、**トポロジがほぼ同じなのに観測境界だけが
+# 違う**——分野の違いが設備ではなく取り扱い区分から来ていることが分かる。
+apiVersion: amenonuboco/v1alpha1
+kind: CyberRange
+metadata:
+  name: government-facility-reference
+  description: 政府施設分野の器。庁舎設備系・物理セキュリティを観測し、機密取扱区画をエアギャップ分離による死角として描く
+
+topology:
+  segments:
+    - { name: corp_it_lan,          cidr: 10.14.10.0/24, kind: it-core }
+    - { name: facility_bms_lan,     cidr: 10.14.20.0/24, kind: ot-lan }
+    - { name: physical_security_lan, cidr: 10.14.30.0/24, kind: security-lan }
+    # 死角。ゲートウェイを接続しない＝エアギャップの表現そのもの。
+    - { name: classified_area_lan,  cidr: 10.14.50.0/24, kind: ot-l2 }
+    - { name: mirror_link,          cidr: 10.14.99.0/24, kind: observation }
+  routing:
+    gateway: wan_router
+  assets:
+    - name: wan_router
+      role: l3-router
+      image: debian:bullseye-slim
+      networks:
+        - { segment: corp_it_lan,           ip: 10.14.10.254 }
+        - { segment: facility_bms_lan,      ip: 10.14.20.254 }
+        - { segment: physical_security_lan, ip: 10.14.30.254 }
+        - { segment: mirror_link,           ip: 10.14.99.254 }
+
+    # --- 観測できる領域: 庁舎設備(機器役) -------------------------------------
+    - name: building_hvac_controller
+      role: ot-asset
+      image: ../protocol-images/bacnet
+      networks:
+        - { segment: facility_bms_lan, ip: 10.14.20.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=device"
+          - "LABEL=building_hvac"
+          - "DEVICE_ID=1401"
+
+    - name: badge_reader_panel
+      # 一般執務区画の入退室管理パネル。物理セキュリティ資産として
+      # 意味的に区別する(Phase7決定事項#104)。
+      role: security-asset
+      image: ../protocol-images/bacnet
+      networks:
+        - { segment: physical_security_lan, ip: 10.14.30.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=device"
+          - "LABEL=badge_reader"
+          - "DEVICE_ID=1402"
+
+    # --- 観測できる領域: 監視役 -----------------------------------------------
+    - name: facility_monitoring_station
+      role: ot-asset
+      image: ../protocol-images/bacnet
+      networks:
+        - { segment: physical_security_lan, ip: 10.14.30.20 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=client"
+          - "LABEL=facility_monitor"
+          - "TARGET=10.14.20.10"
+          - "DEVICE_ID=1401"
+          - "INTERVAL=6"
+
+    - name: security_operations_console
+      role: security-asset
+      image: ../protocol-images/bacnet
+      networks:
+        - { segment: facility_bms_lan, ip: 10.14.20.20 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=client"
+          - "LABEL=security_console"
+          - "TARGET=10.14.30.10"
+          - "DEVICE_ID=1402"
+          - "INTERVAL=8"
+
+    # --- 死角: 機密取扱区画 ---------------------------------------------------
+    #
+    # ここに置く資産は overrides.command を持たない(理由は
+    # nuclear-plant-reference.yaml の同じ位置のコメントを参照)。
+    #
+    # 設備としては一般区画と同種のもの(空調・入退室)だが、分離された系統に
+    # 載るため観測できない。**「同じ建物・同じ設備でも、区画が違えば
+    # 観測できない」**という、この分野に固有の境界の引かれ方。
+    - name: classified_area_hvac
+      role: ot-asset
+      image: ../protocol-images/bacnet
+      networks:
+        - { segment: classified_area_lan, ip: 10.14.50.10 }
+      overrides:
+        environment:
+          - "MODE=device"
+          - "LABEL=classified_hvac"
+          - "DEVICE_ID=1450"
+
+    - name: classified_area_monitor
+      role: ot-asset
+      image: ../protocol-images/bacnet
+      networks:
+        - { segment: classified_area_lan, ip: 10.14.50.11 }
+      overrides:
+        environment:
+          - "MODE=client"
+          - "LABEL=classified_monitor"
+          - "TARGET=10.14.50.10"
+          - "DEVICE_ID=1450"
+          - "INTERVAL=5"
+
+    # --- 観測・検知基盤 -------------------------------------------------------
+    - name: elasticsearch
+      role: detection-infra
+      image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+      networks:
+        - { segment: corp_it_lan, ip: 10.14.10.40 }
+      overrides:
+        environment:
+          - "discovery.type=single-node"
+          - "xpack.security.enabled=false"
+          - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+
+    - name: tap_observer
+      role: observer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link }
+      overrides:
+        command: "apt-get update -qq && apt-get install -y -qq tcpdump >/dev/null 2>&1 && tcpdump -i eth0 -nn"
+
+    - name: log_structurer
+      role: structurer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link, ip: 10.14.99.60 }
+        - { segment: corp_it_lan, ip: 10.14.10.60 }
+
+instrumentation:
+  mirror_to: mirror_link
+  exclude:
+    - classified_area_lan
+
+structuring:
+  engine: tshark
+  protocols:
+    - { name: bacapp, output_index: ot-logs-bacnet-* }  # 表示フィルタ名は罠ログ#033

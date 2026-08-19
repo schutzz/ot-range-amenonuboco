@@ -1,0 +1,183 @@
+# 天沼矛(Amenonuboco) Phase9 Stage4: 原子力分野の器（観測境界を持つ）。
+#
+# この器は、観測できる領域と**構造的に観測できない領域**の両方を持つ。
+# 原子力発電所の安全保護系(原子炉保護系・工学的安全施設作動系)は、
+# 通常の制御系から独立・多重化された専用系であり、有線ネットワークの
+# tap/mirroring を前提とする計装層の考え方が、そもそも成り立たない。
+#
+# これを弱点として隠すのではなく、**機能として描く**。安全保護系の
+# セグメントにはゲートウェイを接続せず、instrumentation.exclude に入れる。
+# ネットワーク図では死角の枠色と「✕ 観測外（死角）」バッジで描かれ、
+# ゲートウェイへのスポーク線も伸びない。
+#
+# **この宣言は強制される。** ゲートウェイが静的IPを持たないセグメントを
+# 観測対象のまま残すと、ミラーリング生成の時点でエラーになる。つまり
+# 「観測している」と宣言するには、実際に観測経路が存在しなければならない。
+# 器が嘘をつけない構造になっていることを、この分野が実地で示す。
+#
+# 資産の中身は protocol-images/ の再利用可能なプロトコル実装
+# (使い方は docs/protocol-assets.md)。
+apiVersion: amenonuboco/v1alpha1
+kind: CyberRange
+metadata:
+  name: nuclear-plant-reference
+  description: 原子力分野の器。バランスオブプラント系を観測し、安全保護系を構造的な死角として描く
+
+topology:
+  segments:
+    - { name: corp_it_lan,      cidr: 10.10.10.0/24, kind: it-core }
+    - { name: bop_control_lan,  cidr: 10.10.20.0/24, kind: ot-lan }
+    - { name: turbine_aux_lan,  cidr: 10.10.30.0/24, kind: ot-lan }
+    # 死角。ゲートウェイを接続しない＝エアギャップの表現そのもの。
+    - { name: safety_system_lan, cidr: 10.10.50.0/24, kind: ot-l2 }
+    - { name: mirror_link,      cidr: 10.10.99.0/24, kind: observation }
+  routing:
+    gateway: wan_router
+  assets:
+    - name: wan_router
+      role: l3-router
+      image: debian:bullseye-slim
+      # safety_system_lan には接続しない。ここに1行足せば観測できてしまう、
+      # という事実こそがこの器の主張——分離は宣言ではなく接続構成で決まる。
+      networks:
+        - { segment: corp_it_lan,     ip: 10.10.10.254 }
+        - { segment: bop_control_lan, ip: 10.10.20.254 }
+        - { segment: turbine_aux_lan, ip: 10.10.30.254 }
+        - { segment: mirror_link,     ip: 10.10.99.254 }
+
+    # --- 観測できる領域: タービン・補機系(機器役) -----------------------------
+    #
+    # プロトコル資産には必ず overrides.command を書く(理由は
+    # chemical-plant-reference.yaml の同じ位置のコメントを参照)。
+    - name: feedwater_pump_plc
+      # 給水ポンプのPLC。二次系（非安全系）の設備。
+      role: ot-asset
+      image: ../protocol-images/modbus
+      networks:
+        - { segment: turbine_aux_lan, ip: 10.10.30.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=server"
+          - "LABEL=feedwater_pump"
+          - "REGISTERS=32"
+
+    - name: condenser_rtu
+      # 復水器まわりのRTU。DNP3アウトステーションとして状態を返す。
+      role: ot-asset
+      image: ../protocol-images/dnp3
+      networks:
+        - { segment: turbine_aux_lan, ip: 10.10.30.11 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=outstation"
+          - "LABEL=condenser_rtu"
+          - "DEVICE_ID=40"
+          - "POINTS=8"
+
+    # --- 観測できる領域: バランスオブプラント制御(監視役) ---------------------
+    - name: bop_control_station
+      role: ot-asset
+      image: ../protocol-images/modbus
+      networks:
+        - { segment: bop_control_lan, ip: 10.10.20.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=client"
+          - "LABEL=bop_control"
+          - "TARGET=10.10.30.10"
+          - "INTERVAL=5"
+
+    - name: bop_scada_master
+      role: ot-asset
+      image: ../protocol-images/dnp3
+      networks:
+        - { segment: bop_control_lan, ip: 10.10.20.11 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=master"
+          - "LABEL=bop_scada"
+          - "TARGET=10.10.30.11"
+          - "DEVICE_ID=1"
+          - "PEER_ID=40"
+          - "INTERVAL=5"
+
+    # --- 死角: 安全保護系 -----------------------------------------------------
+    #
+    # ここに置く資産は overrides.command を持たない。他セグメントへ
+    # 到達する経路が存在しない以上、`ip route add` を生成する余地が無く、
+    # イメージ側のCMDだけで動く。**マニフェストの構造そのものが分離を
+    # 表現している**——観測できる資産と死角の資産で、書き方が変わる。
+    #
+    # 実際の安全保護系が使う通信は非公開のベンダ独自仕様であり、ここに
+    # 置いているのは**通信が存在すること自体を示すための代役**である。
+    # 死角の中では、どのプロトコルであるかは観測結果に一切影響しない
+    # ——見えないものについて具体的な仕様を騙らないための選択でもある。
+    - name: rps_train_a
+      # 原子炉保護系トレインA(多重化された系統の片方)。
+      role: ot-asset
+      image: ../protocol-images/modbus
+      networks:
+        - { segment: safety_system_lan, ip: 10.10.50.10 }
+      overrides:
+        environment:
+          - "MODE=server"
+          - "LABEL=rps_train_a"
+
+    - name: rps_train_b
+      # 原子炉保護系トレインB。トレインAと相互に監視し合う。この通信は
+      # 同一セグメント内で完結するため、たとえゲートウェイを接続しても
+      # ミラーリングには乗らない——二重に観測外である。
+      role: ot-asset
+      image: ../protocol-images/modbus
+      networks:
+        - { segment: safety_system_lan, ip: 10.10.50.11 }
+      overrides:
+        environment:
+          - "MODE=client"
+          - "LABEL=rps_train_b"
+          - "TARGET=10.10.50.10"
+          - "INTERVAL=5"
+
+    # --- 観測・検知基盤 -------------------------------------------------------
+    - name: elasticsearch
+      role: detection-infra
+      image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+      networks:
+        - { segment: corp_it_lan, ip: 10.10.10.40 }
+      overrides:
+        environment:
+          - "discovery.type=single-node"
+          - "xpack.security.enabled=false"
+          - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+
+    - name: tap_observer
+      role: observer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link }
+      overrides:
+        command: "apt-get update -qq && apt-get install -y -qq tcpdump >/dev/null 2>&1 && tcpdump -i eth0 -nn"
+
+    - name: log_structurer
+      role: structurer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link, ip: 10.10.99.60 }
+        - { segment: corp_it_lan, ip: 10.10.10.60 }
+
+instrumentation:
+  mirror_to: mirror_link
+  # 安全保護系を観測対象から外す。ゲートウェイが接続していない以上、
+  # ここを外さなければ生成の時点でエラーになる(器が嘘をつけない)。
+  exclude:
+    - safety_system_lan
+
+structuring:
+  engine: tshark
+  protocols:
+    - { name: modbus, output_index: ot-logs-modbus-* }  # タービン補機系
+    - { name: dnp3,   output_index: ot-logs-dnp3-* }    # バランスオブプラント系

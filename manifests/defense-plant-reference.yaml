@@ -1,0 +1,162 @@
+# 天沼矛(Amenonuboco) Phase9 Stage4: 防衛産業基盤分野の器（観測境界を持つ）。
+#
+# 観測できる領域と**構造的に観測できない領域**の両方を持つ器。設計思想の
+# 詳細は nuclear-plant-reference.yaml の冒頭コメントを参照。
+#
+# 防衛産業の製造現場は、一般の重要製造業と同じ設備・同じプロトコルで動く
+# 区画と、機密区画としてエアギャップ分離された区画に分かれる。技術的には
+# 同じ工場でありながら、**取り扱い区分によって観測の可否が決まる**——
+# 死角の理由が技術的制約ではなく制度的要請である点が、他の分野と異なる。
+#
+# 統裁側にとって重要なのは、この境界が正しく引かれているかを確認できること
+# である。器としては「機密区画に何があるかは分かっているが、そこで何が
+# 起きているかは見えない」状態を、そのまま描く。
+apiVersion: amenonuboco/v1alpha1
+kind: CyberRange
+metadata:
+  name: defense-plant-reference
+  description: 防衛産業基盤分野の器。一般製造区画を観測し、機密区画をエアギャップ分離による死角として描く
+
+topology:
+  segments:
+    - { name: corp_it_lan,           cidr: 10.13.10.0/24, kind: it-core }
+    - { name: production_lan,        cidr: 10.13.20.0/24, kind: ot-lan }
+    - { name: quality_assurance_lan, cidr: 10.13.30.0/24, kind: ot-lan }
+    # 死角。ゲートウェイを接続しない＝エアギャップの表現そのもの。
+    - { name: classified_enclave_lan, cidr: 10.13.50.0/24, kind: ot-l2 }
+    - { name: mirror_link,           cidr: 10.13.99.0/24, kind: observation }
+  routing:
+    gateway: wan_router
+  assets:
+    - name: wan_router
+      role: l3-router
+      image: debian:bullseye-slim
+      networks:
+        - { segment: corp_it_lan,           ip: 10.13.10.254 }
+        - { segment: production_lan,        ip: 10.13.20.254 }
+        - { segment: quality_assurance_lan, ip: 10.13.30.254 }
+        - { segment: mirror_link,           ip: 10.13.99.254 }
+
+    # --- 観測できる領域: 製造系(機器役) ---------------------------------------
+    - name: machining_cell_plc
+      # 加工セルのPLC。EtherNet/IPで上位から監視・制御される。
+      role: ot-asset
+      image: ../protocol-images/enip
+      networks:
+        - { segment: production_lan, ip: 10.13.20.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=adapter"
+          - "LABEL=machining_cell"
+          - "PRODUCT=Machining Cell Controller"
+
+    - name: assembly_robot_controller
+      role: ot-asset
+      image: ../protocol-images/enip
+      networks:
+        - { segment: production_lan, ip: 10.13.20.11 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=adapter"
+          - "LABEL=assembly_robot"
+          - "PRODUCT=Assembly Robot Controller"
+
+    # --- 観測できる領域: 品質保証系(監視役) -----------------------------------
+    - name: qa_inspection_station
+      # 検査工程のステーション。加工セルの状態と測定値を吸い上げる。
+      role: ot-asset
+      image: ../protocol-images/enip
+      networks:
+        - { segment: quality_assurance_lan, ip: 10.13.30.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=scanner"
+          - "LABEL=qa_inspection"
+          - "TARGET=10.13.20.10"
+          - "INTERVAL=5"
+
+    - name: qa_traceability_server
+      # トレーサビリティ管理。組立ロボットの実績を記録する。
+      role: ot-asset
+      image: ../protocol-images/enip
+      networks:
+        - { segment: quality_assurance_lan, ip: 10.13.30.11 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=scanner"
+          - "LABEL=qa_trace"
+          - "TARGET=10.13.20.11"
+          - "INTERVAL=8"
+
+    # --- 死角: 機密区画 -------------------------------------------------------
+    #
+    # ここに置く資産は overrides.command を持たない(理由は
+    # nuclear-plant-reference.yaml の同じ位置のコメントを参照)。
+    #
+    # 区画内の設備は一般区画と同じ種類のものだが、**そこで何が作られ何が
+    # 通信されているかは、器としても表現しない**。死角の中ではどの
+    # プロトコルであるかは観測結果に一切影響しない。
+    - name: classified_cell_controller
+      role: ot-asset
+      image: ../protocol-images/enip
+      networks:
+        - { segment: classified_enclave_lan, ip: 10.13.50.10 }
+      overrides:
+        environment:
+          - "MODE=adapter"
+          - "LABEL=classified_cell"
+          - "PRODUCT=Enclave Controller"
+
+    - name: classified_supervisor
+      role: ot-asset
+      image: ../protocol-images/enip
+      networks:
+        - { segment: classified_enclave_lan, ip: 10.13.50.11 }
+      overrides:
+        environment:
+          - "MODE=scanner"
+          - "LABEL=classified_supervisor"
+          - "TARGET=10.13.50.10"
+          - "INTERVAL=5"
+
+    # --- 観測・検知基盤 -------------------------------------------------------
+    - name: elasticsearch
+      role: detection-infra
+      image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+      networks:
+        - { segment: corp_it_lan, ip: 10.13.10.40 }
+      overrides:
+        environment:
+          - "discovery.type=single-node"
+          - "xpack.security.enabled=false"
+          - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+
+    - name: tap_observer
+      role: observer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link }
+      overrides:
+        command: "apt-get update -qq && apt-get install -y -qq tcpdump >/dev/null 2>&1 && tcpdump -i eth0 -nn"
+
+    - name: log_structurer
+      role: structurer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link, ip: 10.13.99.60 }
+        - { segment: corp_it_lan, ip: 10.13.10.60 }
+
+instrumentation:
+  mirror_to: mirror_link
+  exclude:
+    - classified_enclave_lan
+
+structuring:
+  engine: tshark
+  protocols:
+    # enip を宣言すると、CIP層(cip)も同じドキュメントに入れ子で入る。
+    - { name: enip, output_index: ot-logs-enip-* }

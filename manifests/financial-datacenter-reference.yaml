@@ -1,0 +1,165 @@
+# 天沼矛(Amenonuboco) Phase9 Stage4: 金融分野の器（観測境界を持つ）。
+#
+# 観測できる領域と**構造的に観測できない領域**の両方を持つ器。設計思想の
+# 詳細は nuclear-plant-reference.yaml の冒頭コメントを参照。
+#
+# 金融をこのプラットフォームの対象に含める理由は、**決済そのものではなく
+# それを支える物理基盤**にある。データセンターの電源・空調・入退室は
+# 紛れもないOT設備であり、止まれば決済も止まる。一方、決済ネットワーク本体は
+# 専用線・独自フレーミングで観測系から分離されており、外形的な設備側からは
+# 見えない。
+#
+# **この分野は「OTとして見える範囲」が最も狭い**。器としてそれを正直に
+# 描くことは、15分野を並べたときに「どの分野でも同じだけ観測できるわけでは
+# ない」ことを示す役割を持つ。
+apiVersion: amenonuboco/v1alpha1
+kind: CyberRange
+metadata:
+  name: financial-datacenter-reference
+  description: 金融分野の器。データセンターの設備系・監視を観測し、決済ネットワークを分離された死角として描く
+
+topology:
+  segments:
+    - { name: corp_it_lan,        cidr: 10.15.10.0/24, kind: it-core }
+    - { name: dc_facility_lan,    cidr: 10.15.20.0/24, kind: ot-lan }
+    - { name: dc_network_mgmt_lan, cidr: 10.15.30.0/24, kind: ot-lan }
+    # 死角。ゲートウェイを接続しない。
+    - { name: payment_network_lan, cidr: 10.15.50.0/24, kind: ot-l2 }
+    - { name: mirror_link,        cidr: 10.15.99.0/24, kind: observation }
+  routing:
+    gateway: wan_router
+  assets:
+    - name: wan_router
+      role: l3-router
+      image: debian:bullseye-slim
+      networks:
+        - { segment: corp_it_lan,         ip: 10.15.10.254 }
+        - { segment: dc_facility_lan,     ip: 10.15.20.254 }
+        - { segment: dc_network_mgmt_lan, ip: 10.15.30.254 }
+        - { segment: mirror_link,         ip: 10.15.99.254 }
+
+    # --- 観測できる領域: データセンター設備(機器役) ---------------------------
+    - name: crac_controller
+      # 精密空調(CRAC)のコントローラ。サーバ室の温湿度を保つ。
+      role: ot-asset
+      image: ../protocol-images/bacnet
+      networks:
+        - { segment: dc_facility_lan, ip: 10.15.20.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=device"
+          - "LABEL=crac"
+          - "DEVICE_ID=1501"
+
+    - name: ups_power_controller
+      # 無停電電源装置の管理。電力分野のUPS実演と同じ種類の設備が、
+      # 別の分野では別の意味を持つ——同じ資産が分野をまたいで現れる例。
+      role: ot-asset
+      image: ../protocol-images/snmp
+      networks:
+        - { segment: dc_facility_lan, ip: 10.15.20.11 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=agent"
+          - "LABEL=dc_ups"
+          - "SYSNAME=dc-ups-01"
+          - "SYSLOCATION=Data Hall A"
+
+    # --- 観測できる領域: 監視役 -----------------------------------------------
+    - name: bms_head_end
+      role: ot-asset
+      image: ../protocol-images/bacnet
+      networks:
+        - { segment: dc_network_mgmt_lan, ip: 10.15.30.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=client"
+          - "LABEL=bms_head_end"
+          - "TARGET=10.15.20.10"
+          - "DEVICE_ID=1501"
+          - "INTERVAL=6"
+
+    - name: dc_nms
+      role: ot-asset
+      image: ../protocol-images/snmp
+      networks:
+        - { segment: dc_network_mgmt_lan, ip: 10.15.30.11 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=poller"
+          - "LABEL=dc_nms"
+          - "TARGET=10.15.20.11"
+          - "INTERVAL=5"
+
+    # --- 死角: 決済ネットワーク -----------------------------------------------
+    #
+    # ここに置く資産は overrides.command を持たない(理由は
+    # nuclear-plant-reference.yaml の同じ位置のコメントを参照)。
+    #
+    # 実際の決済網は専用線・独自フレーミングで、設備側の観測系からは
+    # 到達も解釈もできない。ここに置いているのは**通信が存在すること自体を
+    # 示すための代役**であり、死角の中ではどのプロトコルであるかは
+    # 観測結果に一切影響しない。
+    - name: payment_switch
+      role: ot-asset
+      image: ../protocol-images/modbus
+      networks:
+        - { segment: payment_network_lan, ip: 10.15.50.10 }
+      overrides:
+        environment:
+          - "MODE=server"
+          - "LABEL=payment_switch"
+
+    - name: settlement_node
+      role: ot-asset
+      image: ../protocol-images/modbus
+      networks:
+        - { segment: payment_network_lan, ip: 10.15.50.11 }
+      overrides:
+        environment:
+          - "MODE=client"
+          - "LABEL=settlement_node"
+          - "TARGET=10.15.50.10"
+          - "INTERVAL=5"
+
+    # --- 観測・検知基盤 -------------------------------------------------------
+    - name: elasticsearch
+      role: detection-infra
+      image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+      networks:
+        - { segment: corp_it_lan, ip: 10.15.10.40 }
+      overrides:
+        environment:
+          - "discovery.type=single-node"
+          - "xpack.security.enabled=false"
+          - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+
+    - name: tap_observer
+      role: observer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link }
+      overrides:
+        command: "apt-get update -qq && apt-get install -y -qq tcpdump >/dev/null 2>&1 && tcpdump -i eth0 -nn"
+
+    - name: log_structurer
+      role: structurer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link, ip: 10.15.99.60 }
+        - { segment: corp_it_lan, ip: 10.15.10.60 }
+
+instrumentation:
+  mirror_to: mirror_link
+  exclude:
+    - payment_network_lan
+
+structuring:
+  engine: tshark
+  protocols:
+    - { name: bacapp, output_index: ot-logs-bacnet-* }  # 精密空調(表示フィルタ名は罠ログ#033)
+    - { name: snmp,   output_index: ot-logs-snmp-* }    # UPS・ネットワーク機器の管理

@@ -73,7 +73,11 @@ def _gateway_ip_on_segment(gateway: Asset, segment_name: str) -> str:
         raise ComposeGenerationError(
             f"gateway asset '{gateway.name}' has no static ip on segment "
             f"'{segment_name}' (either not connected, or ip left for dynamic "
-            f"assignment); routing generation requires a fixed gateway ip"
+            f"assignment); routing generation requires a fixed gateway ip. "
+            f"意図的にゲートウェイを接続していないセグメント(エアギャップの"
+            f"表現)なら、そこに置く資産から overrides.command を外すこと"
+            f"——他セグメントへ到達する経路が存在しない資産に経路を生成する"
+            f"余地は無く、イメージ側のCMDだけで動かす"
         )
     return ip
 

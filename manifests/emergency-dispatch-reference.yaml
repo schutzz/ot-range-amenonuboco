@@ -1,0 +1,169 @@
+# 天沼矛(Amenonuboco) Phase9 Stage4: 緊急サービス分野の器（観測境界を持つ）。
+#
+# 観測できる領域と**構造的に観測できない領域**の両方を持つ器。設計思想の
+# 詳細は nuclear-plant-reference.yaml の冒頭コメントを参照。
+#
+# 緊急サービスの現場通信はP25等のデジタル業務無線であり、**伝送媒体が
+# そもそも有線ではない**。有線ネットワーク上のtap/mirroringという計装層の
+# 前提が成り立たず、無線を観測するには全く別の装置が要る。原子力(物理的な
+# 分離)・鉄道(dissector不在)とも異なる、3つめの死角の理由である。
+#
+# 一方、指令システムとその周辺のIPネットワークは通常のプロトコルで動いて
+# おり、ここは観測できる。指令台と無線ゲートウェイの境目が、
+# 「見える領域」と「見えない領域」の境界そのものになる。
+apiVersion: amenonuboco/v1alpha1
+kind: CyberRange
+metadata:
+  name: emergency-dispatch-reference
+  description: 緊急サービス分野の器。指令システム・IP系を観測し、P25デジタル無線を伝送媒体の違いによる死角として描く
+
+topology:
+  segments:
+    - { name: corp_it_lan,        cidr: 10.12.10.0/24, kind: it-core }
+    - { name: dispatch_lan,       cidr: 10.12.20.0/24, kind: ot-lan }
+    - { name: radio_gateway_lan,  cidr: 10.12.30.0/24, kind: ot-lan }
+    # 死角。ゲートウェイを接続しない。
+    - { name: p25_rf_lan,         cidr: 10.12.50.0/24, kind: ot-l2 }
+    - { name: mirror_link,        cidr: 10.12.99.0/24, kind: observation }
+  routing:
+    gateway: wan_router
+  assets:
+    - name: wan_router
+      role: l3-router
+      image: debian:bullseye-slim
+      networks:
+        - { segment: corp_it_lan,       ip: 10.12.10.254 }
+        - { segment: dispatch_lan,      ip: 10.12.20.254 }
+        - { segment: radio_gateway_lan, ip: 10.12.30.254 }
+        - { segment: mirror_link,       ip: 10.12.99.254 }
+
+    # --- 観測できる領域: 指令系(受け手) ---------------------------------------
+    - name: dispatch_telephony_switch
+      # 指令台の音声交換機。入電と指令台の間の呼を扱う。認証を要求しない
+      # 設定にしてある——認証の無いSIPサービスが到達可能という状態自体が、
+      # この分野で描きたい構図。
+      role: ot-asset
+      image: ../protocol-images/sip
+      networks:
+        - { segment: dispatch_lan, ip: 10.12.20.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=uas"
+          - "LABEL=dispatch_switch"
+          - "USER=dispatch"
+
+    - name: radio_gateway_mgmt
+      # 無線ゲートウェイの管理インターフェース。**この資産が境界そのもの**
+      # ——IP側から見える管理面と、RF側の見えない伝送面をまたいでいる。
+      role: ot-asset
+      image: ../protocol-images/snmp
+      networks:
+        - { segment: radio_gateway_lan, ip: 10.12.30.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=agent"
+          - "LABEL=radio_gateway"
+          - "SYSNAME=p25-gateway-01"
+          - "SYSLOCATION=Dispatch Center"
+
+    # --- 観測できる領域: 指令系(送り手・監視役) -------------------------------
+    - name: dispatch_console
+      # 指令員の端末。交換機へ登録し、呼を発する。
+      role: ot-asset
+      image: ../protocol-images/sip
+      networks:
+        - { segment: radio_gateway_lan, ip: 10.12.30.20 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=uac"
+          - "LABEL=console"
+          - "TARGET=10.12.20.10"
+          - "USER=console1"
+          - "PEER_USER=dispatch"
+          - "INTERVAL=10"
+
+    - name: dispatch_nms
+      role: ot-asset
+      image: ../protocol-images/snmp
+      networks:
+        - { segment: dispatch_lan, ip: 10.12.20.20 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=poller"
+          - "LABEL=dispatch_nms"
+          - "TARGET=10.12.30.10"
+          - "INTERVAL=5"
+
+    # --- 死角: P25デジタル無線 ------------------------------------------------
+    #
+    # ここに置く資産は overrides.command を持たない(理由は
+    # nuclear-plant-reference.yaml の同じ位置のコメントを参照)。
+    #
+    # 実際の通信はRF上のP25であり、ここに置いているのは**通信が存在すること
+    # 自体を示すための代役**である。死角の中ではどのプロトコルであるかは
+    # 観測結果に一切影響しない。
+    - name: p25_base_station
+      # 基地局。現場の端末と指令センターの間を無線で結ぶ。
+      role: ot-asset
+      image: ../protocol-images/modbus
+      networks:
+        - { segment: p25_rf_lan, ip: 10.12.50.10 }
+      overrides:
+        environment:
+          - "MODE=server"
+          - "LABEL=p25_base"
+
+    - name: field_portable_radio
+      # 現場の携帯端末。基地局と定期的に通信する。
+      role: ot-asset
+      image: ../protocol-images/modbus
+      networks:
+        - { segment: p25_rf_lan, ip: 10.12.50.11 }
+      overrides:
+        environment:
+          - "MODE=client"
+          - "LABEL=field_radio"
+          - "TARGET=10.12.50.10"
+          - "INTERVAL=5"
+
+    # --- 観測・検知基盤 -------------------------------------------------------
+    - name: elasticsearch
+      role: detection-infra
+      image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+      networks:
+        - { segment: corp_it_lan, ip: 10.12.10.40 }
+      overrides:
+        environment:
+          - "discovery.type=single-node"
+          - "xpack.security.enabled=false"
+          - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+
+    - name: tap_observer
+      role: observer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link }
+      overrides:
+        command: "apt-get update -qq && apt-get install -y -qq tcpdump >/dev/null 2>&1 && tcpdump -i eth0 -nn"
+
+    - name: log_structurer
+      role: structurer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link, ip: 10.12.99.60 }
+        - { segment: corp_it_lan, ip: 10.12.10.60 }
+
+instrumentation:
+  mirror_to: mirror_link
+  exclude:
+    - p25_rf_lan
+
+structuring:
+  engine: tshark
+  protocols:
+    - { name: sip,  output_index: ot-logs-sip-* }   # 指令台の音声呼
+    - { name: snmp, output_index: ot-logs-snmp-* }  # 無線ゲートウェイの管理面
