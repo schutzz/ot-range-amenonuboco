@@ -118,6 +118,27 @@ window.AMENONUBOCO_SAMPLES = [
             "role": "ot-asset"
           },
           {
+            "image": "../protocol-images/opcua",
+            "name": "sub_b_process_points",
+            "networks": [
+              {
+                "ip": "10.1.30.15",
+                "segment": "sub_b_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=server",
+                "LABEL=sub_b_process_points"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
             "image": "python:3.10-slim",
             "name": "sub_a_ied_02",
             "networks": [
@@ -403,7 +424,7 @@ window.AMENONUBOCO_SAMPLES = [
             "role": "visualization-engine"
           },
           {
-            "image": "python:3.10-slim",
+            "image": "../protocol-images/opcua",
             "name": "historian",
             "networks": [
               {
@@ -413,8 +434,13 @@ window.AMENONUBOCO_SAMPLES = [
             ],
             "overrides": {
               "cap_add": null,
-              "command": "( python3 -m http.server 4840 & wait )",
-              "environment": [],
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=client",
+                "TARGET=10.1.30.15",
+                "INTERVAL=10",
+                "LABEL=historian"
+              ],
               "ports": [],
               "sysctls": null
             },

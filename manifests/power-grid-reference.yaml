@@ -95,6 +95,21 @@ topology:
         ports: [ "18800:1880" ]
         command: "/usr/src/node-red/entrypoint.sh"
 
+    - name: sub_b_process_points
+      # Phase9決定事項#143: historianがOPC UAクライアントとして集約対象に
+      # するプロセス値公開点(OPC UAサーバ役)。中央のhistorian(cc_lan)とは
+      # 別セグメント(sub_b_lan)に置くことで、両者間の通信がゲートウェイを
+      # 経由し実際にミラーされる(決定事項#137)。
+      role: ot-asset
+      image: ../protocol-images/opcua
+      networks:
+        - { segment: sub_b_lan, ip: 10.1.30.15 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=server"
+          - "LABEL=sub_b_process_points"
+
     - name: sub_a_ied_02
       # 同上、攻撃スクリプト(send_goose_poison.py)の再現もPhase 1のスコープ外。
       role: attacker-insider
@@ -275,16 +290,33 @@ topology:
         - { segment: cc_lan, ip: 10.1.10.72 }
 
     - name: historian
-      # Phase7決定事項#106: 全変電所のプロセス値を集約する歴史データサーバ。
-      # OPC UAでの接続を想定(水道ドラフトのhistorian連携と対になる要素)。
-      # 実際のOPC UAサーバ実装はPhase7の実演スコープでは未着手、ポートの
-      # 存在のみを示す最小リスナー。
+      # 【Phase9決定事項#143で訂正・格上げ】Phase7決定事項#106時点のコメントは
+      # 「全変電所のプロセス値を集約する歴史データサーバ、OPC UAでの接続を
+      # 想定」としながら、実装はcc_lan単独接続でポート4840を開くだけの
+      # http.serverだった。「集約する」と書きながら実際には誰からも
+      # 接続されず、`structuring.protocols`のopcuaエントリは決定事項#140で
+      # 発見したhttpエントリと同じ構造の「宣言だけあってトラフィックが
+      # 存在しない」状態だった(実機確認: tap_observerの生キャプチャで
+      # port 4840宛ては0件)。
+      #
+      # protocol-images/opcua(Phase9 Stage2で実機確認済み)へ差し替える。
+      # 「集約する」という役割上、historian自身をOPC UAクライアント役
+      # (MODE=client)にし、変電所側に新設したOPC UAサーバ役
+      # (sub_b_process_points、決定事項#137のとおり別セグメントに配置)を
+      # 定期的にポーリングする構成にした。historianがcc_lan、ポーリング先が
+      # sub_b_lanと別セグメントのため、ゲートウェイを経由し実際にミラー
+      # されることを実機確認済み。
       role: ot-asset
-      image: python:3.10-slim
+      image: ../protocol-images/opcua
       networks:
         - { segment: cc_lan, ip: 10.1.10.15 }
       overrides:
-        command: "( python3 -m http.server 4840 & wait )"  # OPC UA既定ポート4840
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=client"
+          - "TARGET=10.1.30.15"
+          - "INTERVAL=10"
+          - "LABEL=historian"
 
     - name: cc_ups
       # Phase7決定事項#106・#97・#108: 中央制御室のUPS(無停電電源装置)。
@@ -350,7 +382,7 @@ structuring:
   engine: tshark
   protocols:
     - { name: dnp3,  output_index: ot-logs-dnp3-* }   # Phase5: Signal1(ゾーン逸脱)の実証対象。sub_c_rtuも同一index(1プロトコル=1index、決定事項#39)。Phase9決定事項#138でcc_scada_master/sub_c_rtuを実DNP3化し、許可された送信元からの正当なDNP3(周期Poll)も同じindexへ実際に流れるようになった
-    - { name: opcua, output_index: ot-logs-opcua-* }  # Phase7決定事項#106: historian連携。tshark組み込みdissector(軽い器見込み、要実機検証)
+    - { name: opcua, output_index: ot-logs-opcua-* }  # Phase9決定事項#143でhistorianを実OPC UA化(sub_b_process_pointsをクライアントとしてポーリング)。tshark組み込みdissectorで実機確認済み(Phase9 Stage2)
     - { name: snmp,  output_index: ot-logs-snmp-* }   # Phase7決定事項#106: cc_ups管理。SNMPは最も成熟したtshark対応
 
 detection:
