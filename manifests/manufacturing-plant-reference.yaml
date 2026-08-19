@@ -156,3 +156,5 @@ structuring:
   protocols:
     - { name: enip, output_index: ot-logs-enip-* }  # 監視カメラ経由横展開の主軸実演対象
     - { name: http, output_index: ot-logs-http-* }  # mes_server/nvr_server/access_control_panel等のプレースホルダ用(将来拡張の宣言、電力opcuaと同様)
+    - { name: onvif, output_index: ot-logs-onvif-* } # Phase 9.5 決定事項#138: ONVIF SOAP/XML メッセージ構造化
+    - { name: _ws.malformed, output_index: ot-logs-malformed-* } # Phase 9.5 決定事項#141: パケット破損メタデータ構造化

@@ -52,7 +52,29 @@ def test_dnp3_frame_structure(dnp3_attack):
     assert frame[0:2] == b"\x05\x64"
 
 
-# --- --repeat/--interval(Phase6決定事項#88、デモ用データ蓄積) --------------
+# --- GOOSE複製・再送攻撃(Phase 9.5 決定事項#139) --------------------------
+
+
+@pytest.fixture(scope="module")
+def goose_attack():
+    return _load_module("goose_replay_attack", _SCENARIOS / "goose_replay_attack.py")
+
+
+def test_goose_frame_building(goose_attack):
+    """build_goose_frame が EtherType 0x88B8 を含むパケットを正しく構成すること。"""
+    frame = goose_attack.build_goose_frame(st_num=10, sq_num=1, breaker_tripped=True)
+    # MAC dst(6) + MAC src(6) + EtherType(2) = 14 byte イーサネットヘッダ
+    assert frame[12:14] == b"\x88\xb8"
+    assert b"stNum=10" in frame
+    assert b"cbTripped=1" in frame
+
+
+def test_goose_send_replay_test_mode(goose_attack):
+    """send_goose_replay がエラーを起こさずパケットを送出完了できること。"""
+    sent_bytes = goose_attack.send_goose_replay(
+        interface="lo", count=2, interval=0.01, st_num=5
+    )
+    assert sent_bytes > 0
 
 
 def test_main_default_repeat_is_single_shot(dnp3_attack, monkeypatch):

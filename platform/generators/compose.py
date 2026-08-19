@@ -413,6 +413,19 @@ def _service_block(
             for local_name, cfg in visualization_overlay.configs.items()
         ]
 
+    # Phase 9.5 決定事項#140/#142: structurer ロール資産(および Cgroups リソース制限が
+    # 必要な資産)に対して deploy.resources.limits (CPU / Memory制限) を設定し、
+    # 破損パケットや無限ループ発生時のホスト巻き添えダウンを抑止する。
+    if asset.role == "structurer":
+        service["deploy"] = {
+            "resources": {
+                "limits": {
+                    "cpus": "1.0",
+                    "memory": "512M",
+                }
+            }
+        }
+
     service["restart"] = "unless-stopped"
     return service
 

@@ -798,6 +798,14 @@ window.AMENONUBOCO_SAMPLES = [
           {
             "name": "http",
             "output_index": "ot-logs-http-*"
+          },
+          {
+            "name": "onvif",
+            "output_index": "ot-logs-onvif-*"
+          },
+          {
+            "name": "_ws.malformed",
+            "output_index": "ot-logs-malformed-*"
           }
         ]
       },

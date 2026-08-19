@@ -1,6 +1,6 @@
 # Amenonuboco — Cyber Range as Code
 
-![status](https://img.shields.io/badge/status-Phase%209%20(15%20Sectors)-brightgreen)
+![status](https://img.shields.io/badge/status-Phase%209.5%20(Hardening%20%26%20Polish)-brightgreen)
 
 > **天沼矛（あめのぬぼこ）** — マニフェスト1枚から、OT/ICS向けサイバーレンジ（攻撃対象 + 計装 + 検知パイプライン）を動的にプロビジョニングするためのプラットフォーム。
 
@@ -173,13 +173,14 @@ python cli.py diagram   ../manifests/manufacturing-plant-reference.yaml
 
 ## ステータス
 
-**15分野の器展開が完了しました。** CISA重要インフラ16分野からITを除いた15分野のリファレンスマニフェストが揃い、T字戦略の縦棒（深さ＝3分野の実演）と横棒（幅＝15分野の器）が実際に揃った状態です。
+**Phase 9.5（地盤固め・堅牢化）が完了しました。** 15分野展開（Phase 9）の上に以下の堅牢化を積み上げました。
 
-そこに至るまでの到達点：トポロジ層〜検知・攻撃層の差し込み口、前身 `ot-ids-verum` の検知シナリオ「Signal 1」の縦通し、Grafanaダッシュボードへの可視化配線、電力・上下水道・重要製造業の3分野の実演（実インシデントをモデルにした攻撃シナリオを実プロトコル——SNMP/VNC/EtherNet-IP——で実装し、攻撃者資産からのアクセス→イベント駆動の検知ログ→tshark構造化パイプラインでの実データ抽出まで実機確認）、ブラウザ完結のマニフェストエディタ。
+- **構造化パイプラインの Cgroups サンドボックス化**：攻撃トラフィックを処理する `structurer`（tshark）コンテナに CPU・メモリのリソース制限（`deploy.resources.limits`）を設定。悪意あるパケットやディセクタ脆弱性による無限ループ・メモリバーストがホスト全体を道連れにしない構造を確立。
+- **`_ws.malformed` パケット破損メタデータの検知転用**：tshark が解析失敗と判定した破損パケットのログを `ot-logs-malformed-*` インデックスへ集約し、パケット破壊攻撃の兆候として検知パイプラインへ食わせられるようにした。
+- **ONVIF / RTSP SOAP/XML 深掘り構造化**：重要製造業（監視カメラ経由横展開）シナリオの構造化対象に `onvif` プロトコルを追加。カメラ制御（PTZ 操作・認証・ストリーム設定等）の SOAP メッセージレベル抽出を宣言可能にした。
+- **GOOSE パケット複製・再送の補助実演**：電力サブステーション（IEC 61850）向けに、GOOSE メッセージ（EtherType `0x88B8`）を複製・状態番号改ざん・高速再送する補助実演スクリプト（[`scenarios/legacy-power-grid-signals/goose_replay_attack.py`](./scenarios/legacy-power-grid-signals/goose_replay_attack.py)）を追加。
 
-直近では、分野をまたいで再利用できるプロトコル実装9種をコンテナ化し（いずれもtsharkによるフィールド抽出まで個別に実機確認済み）、12分野をその組み合わせで構築しました。うち6分野は、tap/mirroringの前提と相性の悪い領域を**死角として明示的に持つ器**です。
-
-スキーマ・生成物・GUI（Python/JSのパリティを含む）・シナリオ資産をカバーする pytest スイートと GitHub Actions CI を継続して整備しています。
+累計テスト件数は **385 件**（367 PASS / 18 SKIP、いずれも正常系）です。スキーマ・生成物・GUI（Python/JSのパリティを含む）・シナリオ資産をカバーする pytest スイートと GitHub Actions CI を継続して整備しています。
 
 ### 開発
 

@@ -79,6 +79,9 @@ def generate_structuring_commands(
     # 対策として、全パイプライン起動+waitを1個のサブシェルにまとめ、
     # それ全体を単一のコマンド列要素として返す(内部は`&&`と衝突しない
     # 空白区切り。決定事項#47)。
+    # Phase 9.5 決定事項#141: tsharkの表示フィルタ(proto.name)として `_ws.malformed`
+    # (パケット破損) が指定された場合も、同様に `-Y "_ws.malformed"` として捉え、
+    # 破損パケットのログを `ot-logs-malformed-*` 等のインデックスへ集約・検知転用する。
     launches = [
         (
             f'tshark -i $STRUCT_IF -T ek -Y "{proto.name}" | '

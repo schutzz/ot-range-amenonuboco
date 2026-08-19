@@ -96,7 +96,7 @@ topology:
         command: "/usr/src/node-red/entrypoint.sh"
 
     - name: sub_b_process_points
-      # Phase9決定事項#143: historianがOPC UAクライアントとして集約対象に
+      # Phase9決定事項#151: historianがOPC UAクライアントとして集約対象に
       # するプロセス値公開点(OPC UAサーバ役)。中央のhistorian(cc_lan)とは
       # 別セグメント(sub_b_lan)に置くことで、両者間の通信がゲートウェイを
       # 経由し実際にミラーされる(決定事項#137)。
@@ -290,7 +290,7 @@ topology:
         - { segment: cc_lan, ip: 10.1.10.72 }
 
     - name: historian
-      # 【Phase9決定事項#143で訂正・格上げ】Phase7決定事項#106時点のコメントは
+      # 【Phase9決定事項#151で訂正・格上げ】Phase7決定事項#106時点のコメントは
       # 「全変電所のプロセス値を集約する歴史データサーバ、OPC UAでの接続を
       # 想定」としながら、実装はcc_lan単独接続でポート4840を開くだけの
       # http.serverだった。「集約する」と書きながら実際には誰からも
@@ -382,7 +382,7 @@ structuring:
   engine: tshark
   protocols:
     - { name: dnp3,  output_index: ot-logs-dnp3-* }   # Phase5: Signal1(ゾーン逸脱)の実証対象。sub_c_rtuも同一index(1プロトコル=1index、決定事項#39)。Phase9決定事項#138でcc_scada_master/sub_c_rtuを実DNP3化し、許可された送信元からの正当なDNP3(周期Poll)も同じindexへ実際に流れるようになった
-    - { name: opcua, output_index: ot-logs-opcua-* }  # Phase9決定事項#143でhistorianを実OPC UA化(sub_b_process_pointsをクライアントとしてポーリング)。tshark組み込みdissectorで実機確認済み(Phase9 Stage2)
+    - { name: opcua, output_index: ot-logs-opcua-* }  # Phase9決定事項#151でhistorianを実OPC UA化(sub_b_process_pointsをクライアントとしてポーリング)。tshark組み込みdissectorで実機確認済み(Phase9 Stage2)
     - { name: snmp,  output_index: ot-logs-snmp-* }   # Phase7決定事項#106: cc_ups管理。SNMPは最も成熟したtshark対応
 
 detection:

@@ -102,3 +102,12 @@ def test_network_diagram_is_self_contained(reference_manifest):
     html = render_network_diagram(reference_manifest)
     assert "http://" not in html.replace("http://www.w3.org", "")  # SVG名前空間は除外
     assert "src=" not in html
+
+
+def test_structurer_has_cgroups_limits(compose):
+    """structurer資産に Cgroups リソース制限 (deploy.resources.limits) が設定されていること(Phase 9.5 決定事項#140)。"""
+    structurer_svc = compose["services"]["log_structurer"]
+    assert "deploy" in structurer_svc
+    limits = structurer_svc["deploy"]["resources"]["limits"]
+    assert limits["cpus"] == "1.0"
+    assert limits["memory"] == "512M"
