@@ -48,10 +48,28 @@ class Metadata(BaseModel):
     description: Optional[str] = None
 
 
+class ImpairmentSpec(BaseModel):
+    """tc-netem によるセグメント上位リンク（バックホール）の下り方向の回線劣化仕様。
+
+    Phase 10 決定事項#144/#153: `impairment` は「このセグメントへの下り方向のみ」
+    ——ゲートウェイの該当セグメント向きIF の egress root qdisc に netem をアタッチする。
+    * 上り方向（セグメント→ゲートウェイ）は無制限のまま（非対称）。
+    * 同一セグメント内の通信（ゲートウェイを経由しない）には一切効かない。
+    mirror_to 指定セグメントへの宣言は Manifest レベルのバリデーションで拒否する（決定事項#154）。
+    """
+
+    delay: Optional[str] = None    # 例: "100ms"
+    jitter: Optional[str] = None   # 例: "20ms"
+    loss: Optional[str] = None     # 例: "1.5%"
+    rate: Optional[str] = None     # 例: "9600bit"（レガシーシリアル変換器等の低速帯域）
+
+
 class Segment(BaseModel):
     name: str
     cidr: str
     kind: SegmentKind
+    # Phase 10 決定事項#144: OT 回線劣化エミュレーション（オプション）
+    impairment: Optional[ImpairmentSpec] = None
 
     @model_validator(mode="after")
     def _validate_cidr(self) -> "Segment":
@@ -98,12 +116,36 @@ class AssetOverrides(BaseModel):
     environment: list[str] = Field(default_factory=list)
 
 
+class PhysicalProcessSpec(BaseModel):
+    """物理プロセス（Digital Twin）の離散時間モデル仕様。
+
+    Phase 10 決定事項#146/#152: PLC/RTU 資産に物理プロセスモデルを宣言可能にする。
+    `observed_by` は必須フィールド——省略すると物理エンジンがレジスタを更新しても
+    ワイヤにパケットが出ず、tshark は何も観測できない（宣言したのに可視化されない
+    という historian 型の失敗：決定事項#151 と同型）。
+    さらに `observed_by` が指す資産がこの PLC と同一セグメントにある場合も
+    同様の問題（同一セグメント内通信はゲートウェイを経由しないためミラーされない）
+    を引き起こすため、Manifest レベルのバリデーションで別セグメント配置を強制する
+    （決定事項#152）。
+    """
+
+    type: str               # 物理モデルの種別: "tank_level", "temperature" 等
+    initial_level: float = 0.0
+    capacity: float = 100.0
+    update_interval: str = "1.0s"  # 計算・レジスタ更新の周期
+    bind_registers: dict[str, int] = Field(default_factory=dict)
+    # 必須: 物理値をポーリングする資産名（別セグメント必須）
+    observed_by: str
+
+
 class Asset(BaseModel):
     name: str
     role: AssetRole
     image: str
     networks: list[AssetNetwork] = Field(min_length=1)
     overrides: AssetOverrides = Field(default_factory=AssetOverrides)
+    # Phase 10 決定事項#146: 物理プロセス（Digital Twin）モデル（オプション）
+    physical_process: Optional[PhysicalProcessSpec] = None
 
     def ip_on_segment(self, segment_name: str) -> Optional[str]:
         """指定セグメント上でのこの資産の静的IPを返す(無ければNone、動的割当や
@@ -314,6 +356,49 @@ class Manifest(BaseModel):
                     "structuring層(protocols)を宣言するには role: structurer の"
                     "資産が最低1つ必要です(構造化パイプラインの実行主体が無いと、"
                     "宣言しても tshark が1つも起動しません)"
+                )
+
+        # Phase 10 決定事項#154: mirror_to セグメントへの impairment 宣言を禁止する。
+        # mirror_link 側のゲートウェイ向け IF には決定事項#116 の宛先 MAC 書換ルール
+        # (root handle 1: prio) が既に設定済みであり、netem (同じく root) をアタッチ
+        # すると衝突する。観測用セグメント自体を劣化させる意味も無い。
+        if self.instrumentation is not None:
+            mirror_seg = self.instrumentation.mirror_to
+            for seg in self.topology.segments:
+                if seg.name == mirror_seg and seg.impairment is not None:
+                    raise ValueError(
+                        f"segment '{mirror_seg}' は instrumentation.mirror_to "
+                        f"（観測用セグメント）であるため impairment を宣言できません。"
+                        f"mirror_link 側には決定事項#116 の宛先 MAC 書換ルール "
+                        f"(root handle 1: prio) が既に存在し、netem と衝突します "
+                        f"（Phase 10 決定事項#154）"
+                    )
+
+        # Phase 10 決定事項#152: physical_process.observed_by のクロス検証。
+        # ①observed_by が実在する資産を指しているか
+        # ②observed_by 先の資産が物理プロセス資産と同一セグメントを共有していないか
+        # （同一セグメント内通信はゲートウェイを経由せずミラーされないため）
+        asset_map = {a.name: a for a in self.topology.assets}
+        for asset in self.topology.assets:
+            if asset.physical_process is None:
+                continue
+            observer_name = asset.physical_process.observed_by
+            if observer_name not in asset_map:
+                raise ValueError(
+                    f"asset '{asset.name}' の physical_process.observed_by "
+                    f"'{observer_name}' は存在しない資産を指しています"
+                )
+            observer = asset_map[observer_name]
+            plc_segments = {net.segment for net in asset.networks}
+            observer_segments = {net.segment for net in observer.networks}
+            shared = plc_segments & observer_segments
+            if shared:
+                raise ValueError(
+                    f"asset '{asset.name}' の physical_process.observed_by が指す "
+                    f"'{observer_name}' は、同じセグメント {sorted(shared)} 上にあります。"
+                    f"同一セグメント内の通信はゲートウェイを経由しないためミラーされず、"
+                    f"物理プロセスの値は構造化パイプラインに到達しません。"
+                    f"別セグメントの資産を指定してください（Phase 10 決定事項#152）"
                 )
 
         return self
