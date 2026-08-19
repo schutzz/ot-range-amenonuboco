@@ -40,13 +40,34 @@ from schema import load_manifest, load_role_presets  # noqa: E402
 from schema.topology import AssetRole, SegmentKind  # noqa: E402
 
 # GUIに同梱する組み込みテンプレート(決定事項#121の経路1)。ユーザーが何も
-# インストールせずに「3分野のリファレンス構成を土台に自分の環境を作る」を
+# インストールせずに「リファレンス構成を土台に自分の環境を作る」を
 # できるようにするため、load_manifest()を通したモデルをJSONとして埋め込む。
 # JS側にYAMLパーサを持ち込まないための要でもある。
-_SAMPLE_MANIFESTS: list[tuple[str, str]] = [
-    ("power-grid-reference", "電力"),
-    ("water-utility-reference", "上下水道"),
-    ("manufacturing-plant-reference", "重要製造業"),
+#
+# Phase9で15分野へ拡張した(決定事項#136)。**深さが3段階に分かれるため、
+# 一覧に並べるだけでは何が違うのか分からない**——攻撃・検知まで作り込んだ
+# 3分野と、器だけの12分野を、GUIの選択肢の上で群として区別する。
+# さらに12分野のうち6分野は観測境界(死角)を持ち、他とは読み方が変わるため
+# 別の群にする。(id, 表示名, 群) の3つ組。
+_SAMPLE_MANIFESTS: list[tuple[str, str, str]] = [
+    # 実演まで作り込んだ分野（攻撃・検知・可視化を含む）
+    ("power-grid-reference", "電力", "実演あり"),
+    ("water-utility-reference", "上下水道", "実演あり"),
+    ("manufacturing-plant-reference", "重要製造業", "実演あり"),
+    # 器のみ（topology + instrumentation + structuring の3層）
+    ("chemical-plant-reference", "化学", "器のみ"),
+    ("building-automation-reference", "商業施設", "器のみ"),
+    ("telecom-core-reference", "通信", "器のみ"),
+    ("dam-control-reference", "ダム", "器のみ"),
+    ("food-processing-reference", "食品・農業", "器のみ"),
+    ("hospital-network-reference", "医療", "器のみ"),
+    # 器のみ、かつ観測境界（死角）を持つ分野
+    ("nuclear-plant-reference", "原子力", "器のみ・観測境界あり"),
+    ("rail-transit-reference", "輸送", "器のみ・観測境界あり"),
+    ("emergency-dispatch-reference", "緊急サービス", "器のみ・観測境界あり"),
+    ("defense-plant-reference", "防衛産業基盤", "器のみ・観測境界あり"),
+    ("government-facility-reference", "政府施設", "器のみ・観測境界あり"),
+    ("financial-datacenter-reference", "金融", "器のみ・観測境界あり"),
 ]
 
 
@@ -97,14 +118,15 @@ def build_vocab() -> dict[str, Any]:
 
 
 def build_samples() -> list[dict[str, Any]]:
-    """3分野のリファレンスマニフェストを、GUIの編集モデル形式で返す。"""
+    """15分野のリファレンスマニフェストを、GUIの編集モデル形式で返す。"""
     samples: list[dict[str, Any]] = []
-    for stem, label in _SAMPLE_MANIFESTS:
+    for stem, label, group in _SAMPLE_MANIFESTS:
         manifest = load_manifest(_REPO_ROOT / "manifests" / f"{stem}.yaml")
         samples.append(
             {
                 "id": stem,
                 "label": label,
+                "group": group,
                 "model": manifest_to_model(manifest),
             }
         )

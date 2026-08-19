@@ -24,7 +24,12 @@ import pytest
 from pydantic import ValidationError
 
 from schema.topology import Manifest
-from tools.gen_gui_vocab import manifest_to_model
+from tools.gen_gui_vocab import _SAMPLE_MANIFESTS, manifest_to_model
+
+# パリティを見る対象は15分野すべて。トポロジの規模も形も分野ごとに違い、
+# 3分野だけで合っていても他で崩れる余地が残る(円形自動レイアウトは
+# 資産数・セグメント数に依存するため、規模が変わると差が出やすい)。
+_ALL_STEMS = [stem for stem, _label, _group in _SAMPLE_MANIFESTS]
 
 _NODE = shutil.which("node")
 
@@ -342,14 +347,7 @@ def test_single_quoted_command_does_not_warn(harness_path, gui_dir, base_model):
 # --- レイアウト計算のパリティ ------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "stem",
-    [
-        "power-grid-reference",
-        "water-utility-reference",
-        "manufacturing-plant-reference",
-    ],
-)
+@pytest.mark.parametrize("stem", _ALL_STEMS)
 def test_layout_matches_python_renderer(harness_path, gui_dir, repo_root, stem):
     """GUIのプレビューが、Python版レンダラと同じ座標を出すこと。
 
@@ -392,14 +390,7 @@ def test_layout_matches_python_renderer(harness_path, gui_dir, repo_root, stem):
 # --- YAML出力の往復 ---------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "stem",
-    [
-        "power-grid-reference",
-        "water-utility-reference",
-        "manufacturing-plant-reference",
-    ],
-)
+@pytest.mark.parametrize("stem", _ALL_STEMS)
 def test_exported_yaml_round_trips(harness_path, gui_dir, repo_root, tmp_path, stem):
     """GUIが書き出したYAMLが、Python側で読めて元と同じ3層になること。
 

@@ -672,12 +672,32 @@
 
   function init() {
     const select = $('template-select');
+    // 15分野を平坦に並べると、深さの違い（実演まで作り込んだ分野／器だけの
+    // 分野／観測境界を持つ分野）が選択肢の上で見えなくなる。群ごとに
+    // optgroup で括り、選ぶ前に何を選ぼうとしているのかが分かるようにする。
+    const groups = [];
+    Samples.forEach((s) => {
+      const name = s.group || 'その他';
+      let group = groups.find((g) => g.name === name);
+      if (!group) groups.push((group = { name, items: [] }));
+      group.items.push(s);
+    });
     select.innerHTML =
       '<option value="">テンプレートを選択…</option>' +
       '<option value="__new__">新規（空から作る）</option>' +
-      Samples.map(
-        (s) => `<option value="${esc(s.id)}">${esc(s.label)}（${esc(s.id)}）</option>`
-      ).join('');
+      groups
+        .map(
+          (g) =>
+            `<optgroup label="${esc(g.name)}（${g.items.length}分野）">` +
+            g.items
+              .map(
+                (s) =>
+                  `<option value="${esc(s.id)}">${esc(s.label)}（${esc(s.id)}）</option>`
+              )
+              .join('') +
+            '</optgroup>'
+        )
+        .join('');
     select.addEventListener('change', onTemplateChange);
 
     $('form-pane').addEventListener('input', onInput);

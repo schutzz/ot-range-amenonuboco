@@ -62,17 +62,43 @@ def test_every_role_has_a_color():
     )
 
 
-def test_samples_cover_all_three_sectors():
-    """3分野のリファレンスが同梱されていること。"""
-    samples = build_samples()
-    assert [s["id"] for s in samples] == [
-        "power-grid-reference",
-        "water-utility-reference",
-        "manufacturing-plant-reference",
-    ]
+def test_samples_cover_every_manifest():
+    """manifests/ の全マニフェストがGUIテンプレートとして同梱されていること。
+
+    分野を1枚足したのに `_SAMPLE_MANIFESTS` への追記を忘れると、
+    その分野だけGUIから触れない——ファイルは増えたのにGUIには出てこない、
+    という気づきにくい取りこぼしになる。両者を突き合わせて塞ぐ。
+    """
+    from pathlib import Path
+
+    manifest_dir = Path(__file__).resolve().parent.parent / "manifests"
+    on_disk = {
+        p.stem
+        for p in manifest_dir.glob("*.yaml")
+        if not p.name.endswith(".docker-compose.yml") and ".generated." not in p.name
+    }
+    bundled = {s["id"] for s in build_samples()}
+    assert bundled == on_disk, (
+        f"GUIに同梱されていない分野: {sorted(on_disk - bundled)} / "
+        f"実体の無い同梱: {sorted(bundled - on_disk)}. "
+        "platform/tools/gen_gui_vocab.py の _SAMPLE_MANIFESTS を更新すること"
+    )
 
 
-@pytest.mark.parametrize("index", [0, 1, 2])
+def test_samples_are_grouped_by_depth():
+    """各テンプレートが深さの群を持ち、群が既知の3種であること。
+
+    15分野を平坦に並べると、攻撃・検知まで作り込んだ分野と器だけの分野の
+    区別が選択肢の上で消える。群の宣言自体を表明として固定する。
+    """
+    known = {"実演あり", "器のみ", "器のみ・観測境界あり"}
+    for sample in build_samples():
+        assert sample.get("group") in known, (
+            f"{sample['id']}: 未知の群 '{sample.get('group')}'"
+        )
+
+
+@pytest.mark.parametrize("index", range(len(build_samples())))
 def test_sample_models_are_json_serializable_and_shaped(index):
     """同梱モデルがJSONとして表現でき、GUIが編集する3層の形を持つこと。"""
     sample = build_samples()[index]
