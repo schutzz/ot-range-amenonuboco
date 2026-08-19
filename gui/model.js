@@ -36,7 +36,17 @@
       { segments: [], assets: [], routing: null },
       model.topology || {}
     );
-    model.topology.segments = model.topology.segments || [];
+    model.topology.segments = (model.topology.segments || []).map((s) => ({
+      name: s.name || '',
+      cidr: s.cidr || '',
+      kind: s.kind || 'ot-lan',
+      impairment: s.impairment ? {
+        delay: s.impairment.delay || null,
+        jitter: s.impairment.jitter || null,
+        loss: s.impairment.loss || null,
+        rate: s.impairment.rate || null,
+      } : null,
+    }));
     model.topology.assets = (model.topology.assets || []).map((a) => ({
       name: a.name || '',
       role: a.role || 'ot-asset',
@@ -49,6 +59,14 @@
         { ports: [], command: null, cap_add: null, sysctls: null, environment: [] },
         a.overrides || {}
       ),
+      physical_process: a.physical_process ? {
+        type: a.physical_process.type || 'tank_level',
+        initial_level: a.physical_process.initial_level !== undefined ? a.physical_process.initial_level : 0.0,
+        capacity: a.physical_process.capacity !== undefined ? a.physical_process.capacity : 100.0,
+        update_interval: a.physical_process.update_interval || '1.0s',
+        bind_registers: a.physical_process.bind_registers || {},
+        observed_by: a.physical_process.observed_by || '',
+      } : null,
     }));
     if (model.instrumentation) {
       model.instrumentation = {

@@ -62,7 +62,9 @@
   function renderSegments() {
     const cards = model.topology.segments
       .map(
-        (seg, i) => `
+        (seg, i) => {
+          const imp = seg.impairment || {};
+          return `
         <div class="card">
           <div class="card-head">
             <span class="card-title">${esc(seg.name)}</span>
@@ -82,7 +84,31 @@
               <select data-bind="segment.kind" data-index="${i}">${options(KINDS, seg.kind)}</select>
             </div>
           </div>
-        </div>`
+          <div class="field" style="margin-top:6px;padding-top:6px;border-top:1px dashed #444">
+            <label style="font-size:0.85em;color:#aaa">回線劣化エミュレーション (tc-netem: オプション)</label>
+            <div class="field-row">
+              <div class="field">
+                <label style="font-size:0.75em">delay (例: 100ms)</label>
+                <input type="text" data-bind="segment.impairment.delay" data-index="${i}" value="${esc(imp.delay || '')}">
+              </div>
+              <div class="field">
+                <label style="font-size:0.75em">jitter (例: 20ms)</label>
+                <input type="text" data-bind="segment.impairment.jitter" data-index="${i}" value="${esc(imp.jitter || '')}">
+              </div>
+            </div>
+            <div class="field-row" style="margin-top:4px">
+              <div class="field">
+                <label style="font-size:0.75em">loss (例: 1.5%)</label>
+                <input type="text" data-bind="segment.impairment.loss" data-index="${i}" value="${esc(imp.loss || '')}">
+              </div>
+              <div class="field">
+                <label style="font-size:0.75em">rate (例: 9600bit)</label>
+                <input type="text" data-bind="segment.impairment.rate" data-index="${i}" value="${esc(imp.rate || '')}">
+              </div>
+            </div>
+          </div>
+        </div>`;
+        }
       )
       .join('');
 
@@ -123,6 +149,7 @@
   }
 
   function renderAssets() {
+    const assetNames = model.topology.assets.map((a) => a.name);
     const cards = model.topology.assets
       .map((asset, i) => {
         const preset = M.presetFor(asset.role);
@@ -132,6 +159,9 @@
         const presetHint = presetBits.length
           ? `<div class="preset-hint">ロール既定 → ${esc(presetBits.join(' / '))}</div>`
           : '<div class="preset-hint">ロール既定 → 追加権限なし</div>';
+
+        const pp = asset.physical_process || {};
+        const otherAssets = assetNames.filter((n) => n !== asset.name);
 
         return `
         <div class="card">
@@ -165,6 +195,35 @@
             <label>overrides.ports（カンマ区切り）</label>
             <input type="text" data-bind="asset.ports" data-index="${i}"
                    placeholder="例: 18800:1880" value="${esc((asset.overrides.ports || []).join(', '))}">
+          </div>
+          <div class="field" style="margin-top:6px;padding-top:6px;border-top:1px dashed #444">
+            <label style="font-size:0.85em;color:#aaa">物理プロセス連動 (Digital Twin: オプション)</label>
+            <div class="field-row">
+              <div class="field">
+                <label style="font-size:0.75em">type</label>
+                <input type="text" data-bind="asset.physical_process.type" data-index="${i}"
+                       placeholder="tank_level" value="${esc(pp.type || '')}">
+              </div>
+              <div class="field">
+                <label style="font-size:0.75em">observed_by (別セグメント必須)</label>
+                <select data-bind="asset.physical_process.observed_by" data-index="${i}">
+                  <option value=""${!pp.observed_by ? ' selected' : ''}>（未設定）</option>
+                  ${options(otherAssets, pp.observed_by || '')}
+                </select>
+              </div>
+            </div>
+            <div class="field-row" style="margin-top:4px">
+              <div class="field">
+                <label style="font-size:0.75em">initial_level</label>
+                <input type="number" step="any" data-bind="asset.physical_process.initial_level" data-index="${i}"
+                       value="${pp.initial_level !== undefined && pp.initial_level !== null ? pp.initial_level : ''}">
+              </div>
+              <div class="field">
+                <label style="font-size:0.75em">capacity</label>
+                <input type="number" step="any" data-bind="asset.physical_process.capacity" data-index="${i}"
+                       value="${pp.capacity !== undefined && pp.capacity !== null ? pp.capacity : ''}">
+              </div>
+            </div>
           </div>
         </div>`;
       })
@@ -414,6 +473,38 @@
         (n) => n !== value
       );
       rerenderForm = true; // exclude の候補から mirror_to を外す
+    } else if (bind === 'segment.impairment.delay') {
+      const seg = model.topology.segments[Number(el.dataset.index)];
+      seg.impairment = seg.impairment || {};
+      seg.impairment.delay = value.trim() || null;
+    } else if (bind === 'segment.impairment.jitter') {
+      const seg = model.topology.segments[Number(el.dataset.index)];
+      seg.impairment = seg.impairment || {};
+      seg.impairment.jitter = value.trim() || null;
+    } else if (bind === 'segment.impairment.loss') {
+      const seg = model.topology.segments[Number(el.dataset.index)];
+      seg.impairment = seg.impairment || {};
+      seg.impairment.loss = value.trim() || null;
+    } else if (bind === 'segment.impairment.rate') {
+      const seg = model.topology.segments[Number(el.dataset.index)];
+      seg.impairment = seg.impairment || {};
+      seg.impairment.rate = value.trim() || null;
+    } else if (bind === 'asset.physical_process.type') {
+      const a = assetAt(el);
+      a.physical_process = a.physical_process || { observed_by: '' };
+      a.physical_process.type = value.trim() || 'tank_level';
+    } else if (bind === 'asset.physical_process.observed_by') {
+      const a = assetAt(el);
+      a.physical_process = a.physical_process || { type: 'tank_level' };
+      a.physical_process.observed_by = value.trim();
+    } else if (bind === 'asset.physical_process.initial_level') {
+      const a = assetAt(el);
+      a.physical_process = a.physical_process || { type: 'tank_level', observed_by: '' };
+      a.physical_process.initial_level = value === '' ? 0.0 : Number(value);
+    } else if (bind === 'asset.physical_process.capacity') {
+      const a = assetAt(el);
+      a.physical_process = a.physical_process || { type: 'tank_level', observed_by: '' };
+      a.physical_process.capacity = value === '' ? 100.0 : Number(value);
     } else if (bind === 'protocol.name') {
       model.structuring.protocols[Number(el.dataset.index)].name = value;
     } else if (bind === 'protocol.index') {

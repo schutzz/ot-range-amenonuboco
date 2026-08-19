@@ -237,6 +237,33 @@ def _mutate_structuring_without_structurer(m: dict) -> None:
     ]
 
 
+def _mutate_mirror_to_with_impairment(m: dict) -> None:
+    # Phase 10 決定事項#154: mirror_to セグメントへの impairment 宣言を拒否する
+    mirror_name = m["instrumentation"]["mirror_to"]
+    mirror_seg = next(s for s in m["topology"]["segments"] if s["name"] == mirror_name)
+    mirror_seg["impairment"] = {"delay": "100ms"}
+
+
+def _mutate_physical_process_same_segment(m: dict) -> None:
+    # Phase 10 決定事項#152: observed_by が同一セグメントの資産を指す場合は拒否する
+    assets = m["topology"]["assets"]
+    plc = next(a for a in assets if a["name"] == "sub_b_process_points")
+    plc["physical_process"] = {
+        "type": "tank_level",
+        "observed_by": "sub_b_rtu",  # sub_b_process_points と同じ sub_b_lan に所属
+    }
+
+
+def _mutate_physical_process_missing_observer(m: dict) -> None:
+    # Phase 10 決定事項#152: observed_by が存在しない資産を指す場合は拒否する
+    assets = m["topology"]["assets"]
+    plc = next(a for a in assets if a["name"] == "sub_b_process_points")
+    plc["physical_process"] = {
+        "type": "tank_level",
+        "observed_by": "nonexistent_observer_asset",
+    }
+
+
 REJECT_CASES = {
     "duplicate_segment_name": _mutate_duplicate_segment_name,
     "duplicate_asset_name": _mutate_duplicate_asset_name,
@@ -250,6 +277,9 @@ REJECT_CASES = {
     "gateway_is_not_l3_router": _mutate_gateway_not_router,
     "gateway_references_missing_asset": _mutate_gateway_missing_asset,
     "mirror_to_undefined_segment": _mutate_mirror_to_undefined,
+    "mirror_to_has_impairment": _mutate_mirror_to_with_impairment,
+    "physical_process_observer_same_segment": _mutate_physical_process_same_segment,
+    "physical_process_observer_missing": _mutate_physical_process_missing_observer,
     "exclude_undefined_segment": _mutate_exclude_undefined,
     "duplicate_protocol_name": _mutate_duplicate_protocol,
     "structuring_without_instrumentation": _mutate_structuring_without_instrumentation,

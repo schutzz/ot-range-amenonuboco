@@ -615,6 +615,17 @@ window.AMENONUBOCO_SAMPLES = [
               "ports": [],
               "sysctls": null
             },
+            "physical_process": {
+              "bind_registers": {
+                "level_sensor": 40001,
+                "pump_control": 40002
+              },
+              "capacity": 100.0,
+              "initial_level": 50.0,
+              "observed_by": "wtp_scada_master",
+              "type": "tank_level",
+              "update_interval": "0.5s"
+            },
             "role": "ot-asset"
           },
           {
@@ -772,6 +783,11 @@ window.AMENONUBOCO_SAMPLES = [
           },
           {
             "cidr": "10.2.20.0/24",
+            "impairment": {
+              "delay": "80ms",
+              "jitter": "15ms",
+              "loss": "0.5%"
+            },
             "kind": "ot-lan",
             "name": "pump_station_a_lan"
           },

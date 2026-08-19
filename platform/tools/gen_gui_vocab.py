@@ -152,7 +152,13 @@ def manifest_to_model(manifest: Any) -> dict[str, Any]:
         },
         "topology": {
             "segments": [
-                {"name": s.name, "cidr": s.cidr, "kind": s.kind} for s in topo.segments
+                {
+                    "name": s.name,
+                    "cidr": s.cidr,
+                    "kind": s.kind,
+                    **({"impairment": s.impairment.model_dump(exclude_none=True)} if s.impairment else {}),
+                }
+                for s in topo.segments
             ],
             "assets": [
                 {
@@ -169,6 +175,7 @@ def manifest_to_model(manifest: Any) -> dict[str, Any]:
                         "sysctls": a.overrides.sysctls,
                         "environment": list(a.overrides.environment),
                     },
+                    **({"physical_process": a.physical_process.model_dump(exclude_none=True)} if a.physical_process else {}),
                 }
                 for a in topo.assets
             ],

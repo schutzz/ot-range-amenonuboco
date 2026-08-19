@@ -206,6 +206,58 @@
       out += emitStringList('environment', ov.environment, oi);
     }
 
+    const pp = asset.physical_process;
+    if (pp && (pp.observed_by || pp.type)) {
+      out += `${' '.repeat(inner)}physical_process:\n`;
+      const pi = inner + 2;
+      out += emitScalarField('type', pp.type || 'tank_level', pi);
+      if (pp.initial_level !== undefined && pp.initial_level !== null) {
+        out += `${' '.repeat(pi)}initial_level: ${pp.initial_level}\n`;
+      }
+      if (pp.capacity !== undefined && pp.capacity !== null) {
+        out += `${' '.repeat(pi)}capacity: ${pp.capacity}\n`;
+      }
+      out += emitScalarField('update_interval', pp.update_interval, pi);
+      if (pp.bind_registers && Object.keys(pp.bind_registers).length) {
+        out += `${' '.repeat(pi)}bind_registers:\n`;
+        for (const [k, v] of Object.entries(pp.bind_registers)) {
+          out += `${' '.repeat(pi + 2)}${k}: ${v}\n`;
+        }
+      }
+      out += emitScalarField('observed_by', pp.observed_by, pi);
+    }
+
+    return out;
+  }
+
+  function emitSegment(seg, indent) {
+    const imp = seg.impairment;
+    const hasImpairment =
+      imp &&
+      (imp.delay || imp.jitter || imp.loss || imp.rate);
+
+    if (!hasImpairment) {
+      return emitRecordItem(
+        [
+          ['name', seg.name],
+          ['cidr', seg.cidr],
+          ['kind', seg.kind],
+        ],
+        indent
+      );
+    }
+
+    const pad = ' '.repeat(indent);
+    const inner = indent + 2;
+    let out = `${pad}- name: ${scalar(seg.name)}\n`;
+    out += emitScalarField('cidr', seg.cidr, inner);
+    out += emitScalarField('kind', seg.kind, inner);
+    out += `${' '.repeat(inner)}impairment:\n`;
+    const ii = inner + 2;
+    out += emitScalarField('delay', imp.delay, ii);
+    out += emitScalarField('jitter', imp.jitter, ii);
+    out += emitScalarField('loss', imp.loss, ii);
+    out += emitScalarField('rate', imp.rate, ii);
     return out;
   }
 
@@ -223,14 +275,7 @@
     out += '\ntopology:\n';
     out += '  segments:\n';
     for (const seg of topology.segments || []) {
-      out += emitRecordItem(
-        [
-          ['name', seg.name],
-          ['cidr', seg.cidr],
-          ['kind', seg.kind],
-        ],
-        4
-      );
+      out += emitSegment(seg, 4);
     }
 
     if (topology.routing && topology.routing.gateway) {

@@ -190,6 +190,38 @@
           seen[net.ip] = label;
         }
       }
+
+      // Phase 10 決定事項#146/#152: physical_process の検証
+      if (asset.physical_process) {
+        const pp = asset.physical_process;
+        if (!pp.observed_by || !String(pp.observed_by).trim()) {
+          err(
+            `資産 '${label}': physical_process.observed_by が未設定です（観測役の資産指定が必須）`,
+            `assets.${i}`
+          );
+        } else {
+          const obsAsset = assets.find((a) => a.name === pp.observed_by);
+          if (!obsAsset) {
+            err(
+              `資産 '${label}': physical_process.observed_by '${pp.observed_by}' は存在しない資産を指しています`,
+              `assets.${i}`
+            );
+          } else {
+            const plcSegments = new Set((asset.networks || []).map((n) => n.segment));
+            const obsSegments = new Set((obsAsset.networks || []).map((n) => n.segment));
+            const shared = [...plcSegments].filter((s) => obsSegments.has(s));
+            if (shared.length > 0) {
+              err(
+                `資産 '${label}': physical_process.observed_by が指す '${pp.observed_by}' は、` +
+                  `同じセグメント [${shared.sort().join(', ')}] 上にあります。` +
+                  `同一セグメント内の通信はゲートウェイを経由しないためミラーされません。` +
+                  `別セグメントの資産を指定してください（Phase 10 決定事項#152）`,
+                `assets.${i}`
+              );
+            }
+          }
+        }
+      }
     });
 
     // --- ルーティング ---
@@ -220,6 +252,23 @@
           `instrumentation.mirror_to '${inst.mirror_to || ''}' に対応するセグメントが存在しません`,
           'instrumentation.mirror_to'
         );
+      } else {
+        // Phase 10 決定事項#154: mirror_to セグメントへの impairment 宣言を拒否
+        const mirrorSeg = segments.find((s) => s.name === inst.mirror_to);
+        if (
+          mirrorSeg &&
+          mirrorSeg.impairment &&
+          (mirrorSeg.impairment.delay ||
+            mirrorSeg.impairment.jitter ||
+            mirrorSeg.impairment.loss ||
+            mirrorSeg.impairment.rate)
+        ) {
+          err(
+            `segment '${inst.mirror_to}' は instrumentation.mirror_to（観測用セグメント）であるため ` +
+              `impairment を宣言できません（Phase 10 決定事項#154）`,
+            'instrumentation.mirror_to'
+          );
+        }
       }
       const unknown = (inst.exclude || []).filter((n) => !segmentNameSet.has(n));
       if (unknown.length) {
