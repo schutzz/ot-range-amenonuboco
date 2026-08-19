@@ -1,0 +1,186 @@
+# 天沼矛(Amenonuboco) Phase9 Stage3: 商業施設分野の器。
+#
+# 3分野(電力・上下水道・重要製造業)のような攻撃・検知の実演は持たない。
+# topology + instrumentation + structuring の3層のみ。
+#
+# 商業ビルの建物管理は BACnet/IP がほぼ単一の共通言語になっており、
+# 空調・照明・入退室が同じプロトコルで同じ網に載る——**用途の異なる系統が
+# プロトコルで区別されない**ことが、この分野の観測上の特徴になる。
+# セグメントを分けても、流れているものは同じ BACnet であり、
+# 「どのセグメントで何が起きたか」でしか用途を区別できない。
+#
+# 資産の中身は protocol-images/ の再利用可能なプロトコル実装
+# (使い方は docs/protocol-assets.md)。**機器役とクライアント役は必ず
+# 別セグメントへ置く**——ミラーリングはゲートウェイのingressで行うため、
+# 同一セグメント内で完結する通信はゲートウェイを通らず、観測されない。
+apiVersion: amenonuboco/v1alpha1
+kind: CyberRange
+metadata:
+  name: building-automation-reference
+  description: 商業施設分野の器。商業ビルの建物管理(空調・照明・入退室)をBACnet/IPで構成する
+
+topology:
+  segments:
+    - { name: corp_it_lan,        cidr: 10.5.10.0/24, kind: it-core }
+    - { name: bms_lan,            cidr: 10.5.20.0/24, kind: ot-lan }
+    - { name: floor_hvac_lan,     cidr: 10.5.30.0/24, kind: ot-lan }
+    - { name: floor_lighting_lan, cidr: 10.5.40.0/24, kind: ot-lan }
+    - { name: access_control_lan, cidr: 10.5.50.0/24, kind: security-lan }
+    - { name: mirror_link,        cidr: 10.5.99.0/24, kind: observation }
+  routing:
+    gateway: wan_router
+  assets:
+    - name: wan_router
+      role: l3-router
+      image: debian:bullseye-slim
+      networks:
+        - { segment: corp_it_lan,        ip: 10.5.10.254 }
+        - { segment: bms_lan,            ip: 10.5.20.254 }
+        - { segment: floor_hvac_lan,     ip: 10.5.30.254 }
+        - { segment: floor_lighting_lan, ip: 10.5.40.254 }
+        - { segment: access_control_lan, ip: 10.5.50.254 }
+        - { segment: mirror_link,        ip: 10.5.99.254 }
+
+    # --- フロア設備(機器役) ---------------------------------------------------
+    #
+    # プロトコル資産には必ず overrides.command を書く(理由は
+    # chemical-plant-reference.yaml の同じ位置のコメントを参照)。
+    - name: ahu_controller
+      # 空調機(AHU)コントローラ。給気温度・還気温度を present-value として持つ。
+      role: ot-asset
+      image: ../protocol-images/bacnet
+      networks:
+        - { segment: floor_hvac_lan, ip: 10.5.30.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=device"
+          - "LABEL=ahu_controller"
+          - "DEVICE_ID=3001"
+
+    - name: vav_controller
+      # VAVユニット(可変風量装置)。フロア単位の風量制御を担う。
+      role: ot-asset
+      image: ../protocol-images/bacnet
+      networks:
+        - { segment: floor_hvac_lan, ip: 10.5.30.11 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=device"
+          - "LABEL=vav_controller"
+          - "DEVICE_ID=3002"
+
+    - name: lighting_gateway
+      # 照明制御ゲートウェイ。フロアの照明群をBACnetオブジェクトとして束ねる。
+      role: ot-asset
+      image: ../protocol-images/bacnet
+      networks:
+        - { segment: floor_lighting_lan, ip: 10.5.40.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=device"
+          - "LABEL=lighting_gateway"
+          - "DEVICE_ID=4001"
+
+    - name: access_control_panel
+      # 入退室管理パネル。物理セキュリティ資産だが、建物管理network上では
+      # 空調・照明と同じ BACnet で監視される構成が実際に多い。
+      # security-assetロールで意味的に区別する(Phase7決定事項#104)。
+      role: security-asset
+      image: ../protocol-images/bacnet
+      networks:
+        - { segment: access_control_lan, ip: 10.5.50.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=device"
+          - "LABEL=access_panel"
+          - "DEVICE_ID=5001"
+
+    # --- BMSヘッドエンド(監視役) ----------------------------------------------
+    #
+    # 3系統それぞれに専用の監視プロセスを置く。1つのクライアントが複数の
+    # 機器を巡回する実装にもできるが、系統ごとに分けておく方が
+    # 「どの系統への通信が途絶えたか」を観測側から切り分けやすい。
+    - name: bms_hvac_supervisor
+      role: ot-asset
+      image: ../protocol-images/bacnet
+      networks:
+        - { segment: bms_lan, ip: 10.5.20.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=client"
+          - "LABEL=bms_hvac"
+          - "TARGET=10.5.30.10"
+          - "DEVICE_ID=3001"
+          - "INTERVAL=5"
+
+    - name: bms_lighting_scheduler
+      role: ot-asset
+      image: ../protocol-images/bacnet
+      networks:
+        - { segment: bms_lan, ip: 10.5.20.11 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=client"
+          - "LABEL=bms_lighting"
+          - "TARGET=10.5.40.10"
+          - "DEVICE_ID=4001"
+          - "INTERVAL=8"
+
+    - name: bms_access_monitor
+      role: ot-asset
+      image: ../protocol-images/bacnet
+      networks:
+        - { segment: bms_lan, ip: 10.5.20.12 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=client"
+          - "LABEL=bms_access"
+          - "TARGET=10.5.50.10"
+          - "DEVICE_ID=5001"
+          - "INTERVAL=6"
+
+    # --- 観測・検知基盤 -------------------------------------------------------
+    - name: elasticsearch
+      role: detection-infra
+      image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+      networks:
+        - { segment: corp_it_lan, ip: 10.5.10.40 }
+      overrides:
+        environment:
+          - "discovery.type=single-node"
+          - "xpack.security.enabled=false"
+          - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+
+    - name: tap_observer
+      role: observer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link }
+      overrides:
+        command: "apt-get update -qq && apt-get install -y -qq tcpdump >/dev/null 2>&1 && tcpdump -i eth0 -nn"
+
+    - name: log_structurer
+      role: structurer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link, ip: 10.5.99.60 }
+        - { segment: corp_it_lan, ip: 10.5.10.60 }
+
+instrumentation:
+  mirror_to: mirror_link
+  exclude: []
+
+structuring:
+  engine: tshark
+  protocols:
+    # 表示フィルタ名は bacnet ではなく bacapp(BACnetアプリケーション層)。
+    # 通称そのままの名前を書くと、ディセクタは正常に動いているのに
+    # レコードが0件になる(罠ログ#033)。
+    - { name: bacapp, output_index: ot-logs-bacnet-* }

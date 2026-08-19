@@ -105,7 +105,15 @@ def _routing_commands(topology: Topology, asset: Asset) -> list[str]:
 # 前身(ot-ids-verum)の実データにはDebian系(debian:bullseye-slim, python:3.10-slim)とAlpine系
 # (nodered/node-red, timberio/vector:...-alpine)が混在しており、どちらかに
 # 決め打ちすると他方のイメージで確実に壊れる(Phase1決定事項#21)。
+#
+# 先頭で`ip`コマンドの存在を確認し、既にあるなら導入処理を丸ごと飛ばす
+# (Phase9決定事項#135)。Phase9でプロトコル資産をイメージ化した結果、
+# 1つのレンジが立ち上がるまでに走るapt-getの回数が分野あたり6〜8回に増え、
+# **起動のたびに外部のパッケージ配信へネットワーク越しに依存する**構造に
+# なっていた。イメージ側でiproute2を同梱しておけば、この行で短絡して
+# 起動が速くなり、パッケージ配信が不調でもレンジが立ち上がる。
 _INSTALL_IPROUTE2 = (
+    "(command -v ip >/dev/null 2>&1) || "
     "(command -v apt-get >/dev/null 2>&1 && apt-get update -qq && "
     "apt-get install -y -qq iproute2 >/dev/null 2>&1) || "
     "(command -v apk >/dev/null 2>&1 && apk add --no-cache -q iproute2 >/dev/null 2>&1)"

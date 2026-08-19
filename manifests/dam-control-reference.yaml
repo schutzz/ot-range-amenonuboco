@@ -1,0 +1,173 @@
+# 天沼矛(Amenonuboco) Phase9 Stage3: ダム分野の器。
+#
+# 3分野(電力・上下水道・重要製造業)のような攻撃・検知の実演は持たない。
+# topology + instrumentation + structuring の3層のみ。
+#
+# 治水ダムは、①現地のゲート制御(直接プロセスを動かす)と②遠隔監視所からの
+# 水位・流量の収集(広域・低速回線)という2つの通信を持つ。後者にDNP3が
+# 使われるのは、もともと広域の遠方監視制御を前提に設計されたプロトコルだから
+# である。この器ではその使い分けを、Modbus(現地の機器間)とDNP3(遠隔監視)の
+# 配置として表現している。
+#
+# 資産の中身は protocol-images/ の再利用可能なプロトコル実装
+# (使い方は docs/protocol-assets.md)。**サーバ役とクライアント役は必ず
+# 別セグメントへ置く**——ミラーリングはゲートウェイのingressで行うため、
+# 同一セグメント内で完結する通信はゲートウェイを通らず、観測されない。
+apiVersion: amenonuboco/v1alpha1
+kind: CyberRange
+metadata:
+  name: dam-control-reference
+  description: ダム分野の器。治水ダム(ゲート制御・水位計・遠隔監視所)をModbus/TCPとDNP3で構成する
+
+topology:
+  segments:
+    - { name: corp_it_lan,       cidr: 10.7.10.0/24, kind: it-core }
+    - { name: scada_lan,         cidr: 10.7.20.0/24, kind: ot-lan }
+    - { name: gate_control_lan,  cidr: 10.7.30.0/24, kind: ot-lan }
+    - { name: remote_site_lan,   cidr: 10.7.40.0/24, kind: ot-lan }
+    - { name: mirror_link,       cidr: 10.7.99.0/24, kind: observation }
+  routing:
+    gateway: wan_router
+  assets:
+    - name: wan_router
+      role: l3-router
+      image: debian:bullseye-slim
+      networks:
+        - { segment: corp_it_lan,      ip: 10.7.10.254 }
+        - { segment: scada_lan,        ip: 10.7.20.254 }
+        - { segment: gate_control_lan, ip: 10.7.30.254 }
+        - { segment: remote_site_lan,  ip: 10.7.40.254 }
+        - { segment: mirror_link,      ip: 10.7.99.254 }
+
+    # --- 現地ゲート制御(機器役) -----------------------------------------------
+    #
+    # プロトコル資産には必ず overrides.command を書く(理由は
+    # chemical-plant-reference.yaml の同じ位置のコメントを参照)。
+    - name: spillway_gate_plc
+      # 洪水吐きゲートのPLC。開度指令を保持レジスタとして受ける。
+      role: ot-asset
+      image: ../protocol-images/modbus
+      networks:
+        - { segment: gate_control_lan, ip: 10.7.30.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=server"
+          - "LABEL=spillway_gate"
+          - "REGISTERS=16"
+
+    - name: gate_rtu
+      # ゲート設備のRTU。DNP3アウトステーションとして、開度・状態を
+      # 上位へ返し、制御指令(Direct Operate)を受ける。
+      role: ot-asset
+      image: ../protocol-images/dnp3
+      networks:
+        - { segment: gate_control_lan, ip: 10.7.30.11 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=outstation"
+          - "LABEL=gate_rtu"
+          - "DEVICE_ID=20"
+          - "POINTS=6"
+
+    # --- 遠隔監視所(機器役) ---------------------------------------------------
+    - name: reservoir_level_rtu
+      # 貯水池の水位計RTU。上流の観測所に置かれ、広域回線でつながる。
+      role: ot-asset
+      image: ../protocol-images/dnp3
+      networks:
+        - { segment: remote_site_lan, ip: 10.7.40.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=outstation"
+          - "LABEL=level_rtu"
+          - "DEVICE_ID=30"
+          - "POINTS=4"
+
+    # --- 中央制御室(監視・指令役) ---------------------------------------------
+    - name: gate_control_master
+      # ゲートPLCの保持レジスタを読み書きする現地制御用マスタ。
+      role: ot-asset
+      image: ../protocol-images/modbus
+      networks:
+        - { segment: scada_lan, ip: 10.7.20.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=client"
+          - "LABEL=gate_master"
+          - "TARGET=10.7.30.10"
+          - "INTERVAL=5"
+
+    - name: scada_master_dnp3
+      # ゲートRTUへのIntegrity Pollと、時折のDirect Operate(ゲート投入指令に
+      # あたる制御)を出す。読み取りと制御指令がファンクションコードとして
+      # 明確に分かれるため、観測側から「何をされたか」が区別できる。
+      role: ot-asset
+      image: ../protocol-images/dnp3
+      networks:
+        - { segment: scada_lan, ip: 10.7.20.11 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=master"
+          - "LABEL=scada_master"
+          - "TARGET=10.7.30.11"
+          - "DEVICE_ID=1"
+          - "PEER_ID=20"
+          - "INTERVAL=5"
+
+    - name: remote_site_poller
+      # 遠隔監視所の水位計を巡回するマスタ。広域回線を想定して周期は長い。
+      role: ot-asset
+      image: ../protocol-images/dnp3
+      networks:
+        - { segment: scada_lan, ip: 10.7.20.12 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=master"
+          - "LABEL=remote_poller"
+          - "TARGET=10.7.40.10"
+          - "DEVICE_ID=2"
+          - "PEER_ID=30"
+          - "INTERVAL=10"
+
+    # --- 観測・検知基盤 -------------------------------------------------------
+    - name: elasticsearch
+      role: detection-infra
+      image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+      networks:
+        - { segment: corp_it_lan, ip: 10.7.10.40 }
+      overrides:
+        environment:
+          - "discovery.type=single-node"
+          - "xpack.security.enabled=false"
+          - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+
+    - name: tap_observer
+      role: observer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link }
+      overrides:
+        command: "apt-get update -qq && apt-get install -y -qq tcpdump >/dev/null 2>&1 && tcpdump -i eth0 -nn"
+
+    - name: log_structurer
+      role: structurer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link, ip: 10.7.99.60 }
+        - { segment: corp_it_lan, ip: 10.7.10.60 }
+
+instrumentation:
+  mirror_to: mirror_link
+  exclude: []
+
+structuring:
+  engine: tshark
+  protocols:
+    - { name: modbus, output_index: ot-logs-modbus-* }  # 現地のゲート制御
+    - { name: dnp3,   output_index: ot-logs-dnp3-* }    # 遠方監視制御(読み取りと制御指令)

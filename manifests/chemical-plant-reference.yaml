@@ -1,0 +1,153 @@
+# 天沼矛(Amenonuboco) Phase9 Stage3: 化学分野の器。
+#
+# 3分野(電力・上下水道・重要製造業)のような攻撃・検知の実演は持たない。
+# topology + instrumentation + structuring の3層のみで、「この分野の
+# ネットワークを宣言すれば、観測経路と構造化パイプラインまで含めて
+# 一式が生成される」ことを示すための器。
+#
+# 資産の中身は protocol-images/ の再利用可能なプロトコル実装
+# (使い方は docs/protocol-assets.md)。**サーバ役とクライアント役は必ず
+# 別セグメントへ置く**——ミラーリングはゲートウェイのingressで行うため、
+# 同一セグメント内で完結する通信はゲートウェイを通らず、観測されない。
+apiVersion: amenonuboco/v1alpha1
+kind: CyberRange
+metadata:
+  name: chemical-plant-reference
+  description: 化学分野の器。バッチプラント(反応器・計装ループ・DCS)をModbus/TCPとOPC UAで構成する
+
+topology:
+  segments:
+    - { name: corp_it_lan,          cidr: 10.4.10.0/24, kind: it-core }
+    - { name: plant_dmz,            cidr: 10.4.15.0/24, kind: dmz }
+    - { name: process_control_lan,  cidr: 10.4.20.0/24, kind: ot-lan }
+    - { name: field_instrument_lan, cidr: 10.4.30.0/24, kind: ot-lan }
+    - { name: mirror_link,          cidr: 10.4.99.0/24, kind: observation }
+  routing:
+    gateway: wan_router
+  assets:
+    - name: wan_router
+      role: l3-router
+      image: debian:bullseye-slim
+      networks:
+        - { segment: corp_it_lan,          ip: 10.4.10.254 }
+        - { segment: plant_dmz,            ip: 10.4.15.254 }
+        - { segment: process_control_lan,  ip: 10.4.20.254 }
+        - { segment: field_instrument_lan, ip: 10.4.30.254 }
+        - { segment: mirror_link,          ip: 10.4.99.254 }
+
+    # --- 現場計装層(機器役) ---------------------------------------------------
+    #
+    # プロトコル資産には必ず overrides.command を書く。ot-assetロールは
+    # NET_ADMIN を持つが、generators/compose.py の needs_routing 判定は
+    # 「自前の起動コマンドを持つこと」も条件にしており、これが無いと
+    # 他セグメントへの ip route add が生成されない。経路が無くても Docker の
+    # 既定ゲートウェイ経由で**通信自体は成立してしまう**ため、その場合
+    # 「コンテナは動いているのに観測ノードに何も届かない」という、最も
+    # 気づきにくい壊れ方をする。
+    - name: reactor_plc
+      # 反応器のPLC。撹拌・昇温・保持といったバッチ手順の実行主体。
+      role: ot-asset
+      image: ../protocol-images/modbus
+      networks:
+        - { segment: field_instrument_lan, ip: 10.4.30.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=server"
+          - "LABEL=reactor_plc"
+          - "REGISTERS=64"
+
+    - name: jacket_temp_controller
+      # 反応器ジャケットの温度制御ループ。OPC UAで現在値を公開する。
+      role: ot-asset
+      image: ../protocol-images/opcua
+      networks:
+        - { segment: field_instrument_lan, ip: 10.4.30.11 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=server"
+          - "LABEL=jacket_temp"
+
+    # --- プロセス制御層(監視・指令役) -----------------------------------------
+    - name: batch_control_station
+      # バッチ制御ステーション。反応器PLCの保持レジスタを読み書きする。
+      role: ot-asset
+      image: ../protocol-images/modbus
+      networks:
+        - { segment: process_control_lan, ip: 10.4.20.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=client"
+          - "LABEL=batch_control"
+          - "TARGET=10.4.30.10"
+          - "INTERVAL=5"
+
+    - name: dcs_operator_station
+      # DCSのオペレータステーション。温度ループの値を周期購読する。
+      role: ot-asset
+      image: ../protocol-images/opcua
+      networks:
+        - { segment: process_control_lan, ip: 10.4.20.11 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=client"
+          - "LABEL=dcs_operator"
+          - "TARGET=10.4.30.11"
+          - "INTERVAL=5"
+
+    # --- DMZ層 ---------------------------------------------------------------
+    - name: plant_historian
+      # プラントヒストリアン。IT/OT境界に置かれ、現場の値を吸い上げる。
+      # 上位(corp_it_lan)からの参照点であると同時に、OT側へ降りていく
+      # 経路でもあるため、実際の侵害経路として繰り返し問題になる位置。
+      role: ot-asset
+      image: ../protocol-images/opcua
+      networks:
+        - { segment: plant_dmz, ip: 10.4.15.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=client"
+          - "LABEL=historian"
+          - "TARGET=10.4.30.11"
+          - "INTERVAL=10"
+
+    # --- 観測・検知基盤 -------------------------------------------------------
+    - name: elasticsearch
+      role: detection-infra
+      image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+      networks:
+        - { segment: corp_it_lan, ip: 10.4.10.40 }
+      overrides:
+        environment:
+          - "discovery.type=single-node"
+          - "xpack.security.enabled=false"
+          - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+
+    - name: tap_observer
+      role: observer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link }
+      overrides:
+        command: "apt-get update -qq && apt-get install -y -qq tcpdump >/dev/null 2>&1 && tcpdump -i eth0 -nn"
+
+    - name: log_structurer
+      role: structurer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link, ip: 10.4.99.60 }
+        - { segment: corp_it_lan, ip: 10.4.10.60 }
+
+instrumentation:
+  mirror_to: mirror_link
+  exclude: []
+
+structuring:
+  engine: tshark
+  protocols:
+    - { name: modbus, output_index: ot-logs-modbus-* }  # 反応器PLCの読み書き
+    - { name: opcua,  output_index: ot-logs-opcua-* }   # 温度ループの購読・書き込み
