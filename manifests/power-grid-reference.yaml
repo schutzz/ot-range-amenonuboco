@@ -42,27 +42,47 @@ topology:
         - { segment: sub_d_l2_lan, ip: 10.1.50.254 }
 
     - name: cc_scada_master
-      # Phase 1はトポロジ/ルーティング層のみの等価性検証が目的であり、前身の
-      # 実アプリ(scada_mtu_server.py)の再現はスコープ外だった。Phase5で
-      # Signal1(ゾーン逸脱)の実証対象として、20000番ポートでTCP接続を受ける
-      # だけの最小リスナーを追加する(overrides.commandはPhase1決定事項#17の
-      # 通りアプリ内容としてユーザーが自由に書ける領域であり、生成器が制限する
-      # 対象ではない)。python標準ライブラリのhttp.serverはHTTPとして解釈でき
-      # なくても実際のTCPペイロードはワイヤに乗るため、tsharkのポートベースの
-      # DNP3判定(既定でtcp/20000)には十分。前身のot_allowlist.csv上でも
-      # 10.0.10.10(このIPの前身版)がDNP3送信元として唯一許可されていた資産
-      # (Phase5決定事項#68)。
+      # 【Phase9決定事項#138で訂正・格上げ】Phase1〜5時点のコメントは
+      # 「python標準ライブラリのhttp.serverはHTTPとして解釈できなくても
+      # 実際のTCPペイロードはワイヤに乗るため、tsharkのポートベースのDNP3
+      # 判定には十分」と主張していたが、これは誤りだった。Phase9 Stage6の
+      # 実機確認で、ポート20000上のプレーンなHTTPペイロードに対し
+      # `tshark -Y dnp3` が0件になることを確認した——tsharkのDNP3
+      # dissectorはポート番号だけでなく開始バイト列(0x0564)とフレーム構造
+      # そのものを検査するため、DNP3として妥当な形をしていないペイロードは
+      # port-based heuristicでも拾われない(罠#033と同系統: 「tsharkがこう
+      # 振る舞うはず」という未検証の前提)。
+      #
+      # 実際にzone_violationが検知していたDNP3は、常にdnp3_zone_attack.py
+      # (本物のDNP3フレーム、正しいCRCを持つ)が送るものだった。つまり
+      # ALLOWED_DNP3_SOURCES=10.1.10.10(このノード)からの正当なDNP3が
+      # 一度も流れておらず、許可リストの「許可される側」の枝が実データで
+      # 検証されないまま残っていた——Signal1は「不正アクセスを検知する」
+      # ことだけを実証しており、「正当なアクセスを誤検知しない」ことは
+      # 実証していなかった。
+      #
+      # protocol-images/dnp3(Phase9 Stage2で実機確認済み)へ差し替え、
+      # 二重の役割を持たせる。①DNP3アウトステーションとして20000番で
+      # 待ち受け、既存のdnp3_zone_attack.pyの手組みフレームをそのまま
+      # 解釈・応答する(攻撃実演との後方互換を保つ)。②同時にDNP3マスタ
+      # として sub_c_rtu へ周期的なIntegrity Pollを送る(実際のSCADA
+      # マスタが行う定常運用そのもの)。②で生成されるDNP3パケットの
+      # 送信元は常にこのノード自身(10.1.10.10=ALLOWED_DNP3_SOURCES)で
+      # あり、zone_violationが正しく沈黙し続けることを、攻撃の有無に
+      # 依存しない形で実データにより裏付ける。
       role: ot-asset
-      image: python:3.10-slim
+      image: ../protocol-images/dnp3
       networks:
         - { segment: cc_lan, ip: 10.1.10.10 }
       overrides:
-        # バックグラウンド起動(&)を裸で書くと、呼び出し元が全コマンド列を
-        # &&で結合する仕組み(compose.py側)と衝突しかねない(罠ログ#010と
-        # 同型の危険)。Phase3決定事項#47と同じ「( cmd & wait )」の
-        # サブシェル形式にして、この資産のcommand全体が単一の安全な
-        # ブロッキングコマンドになるようにする。
-        command: "( python3 -m http.server 20000 & wait )"
+        # 2プロセスを1コンテナで同時に走らせる(既存の「( cmd & wait )」
+        # 型の拡張)。アウトステーション役はポート20000を待ち受けるのみで
+        # 送信ソケットを持たないため、マスタ役(こちらはTARGETへの発信の
+        # みでリッスンしない)とポートが衝突しない。
+        command: |
+          ( MODE=outstation DEVICE_ID=10 LABEL=cc_scada_master_rx python3 /app/run.py &
+            MODE=master TARGET=10.1.40.10 DEVICE_ID=1 PEER_ID=20 INTERVAL=8 LABEL=cc_scada_master_poll python3 /app/run.py &
+            wait )
 
     - name: sub_b_rtu_hmi
       # Alpine系イメージ(apk)。ルーティング生成のapk経路を検証する対象でもある
@@ -85,15 +105,22 @@ topology:
         command: "tail -f /dev/null"
 
     - name: sub_c_rtu
-      # Phase7決定事項#106: 変電所C(DNP3系、sub_bと同型だが独立資産)のRTU。
-      # cc_scada_masterと同じ最小リスナー構成(tsharkのポートベースDNP3判定
-      # には十分、Phase1-Provisioner.md §3.6と同じ理由)。
+      # 【Phase9決定事項#138で訂正・格上げ】変電所C(DNP3系、sub_bと同型だが
+      # 独立資産)のRTU。旧コメントは「tsharkのポートベースDNP3判定には
+      # 十分」と主張していたが誤りだった(cc_scada_masterの同じ位置の
+      # コメントを参照)。protocol-images/dnp3のアウトステーションへ差し替え、
+      # cc_scada_masterからの周期的なIntegrity Pollを実際に受けて応答する。
       role: ot-asset
-      image: python:3.10-slim
+      image: ../protocol-images/dnp3
       networks:
         - { segment: sub_c_lan, ip: 10.1.40.10 }
       overrides:
-        command: "( python3 -m http.server 20000 & wait )"
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=outstation"
+          - "LABEL=sub_c_rtu"
+          - "DEVICE_ID=20"
+          - "POINTS=4"
 
     - name: sub_c_hmi
       # 変電所Cの監視員向けHMI。sub_b_rtu_hmiと同型(Node-RED)。1変電所内に
@@ -303,7 +330,7 @@ structuring:
   engine: tshark
   protocols:
     - { name: http,  output_index: ot-logs-http-* }
-    - { name: dnp3,  output_index: ot-logs-dnp3-* }   # Phase5: Signal1(ゾーン逸脱)の実証対象。sub_c_rtuも同一index(1プロトコル=1index、決定事項#39)
+    - { name: dnp3,  output_index: ot-logs-dnp3-* }   # Phase5: Signal1(ゾーン逸脱)の実証対象。sub_c_rtuも同一index(1プロトコル=1index、決定事項#39)。Phase9決定事項#138でcc_scada_master/sub_c_rtuを実DNP3化し、許可された送信元からの正当なDNP3(周期Poll)も同じindexへ実際に流れるようになった
     - { name: opcua, output_index: ot-logs-opcua-* }  # Phase7決定事項#106: historian連携。tshark組み込みdissector(軽い器見込み、要実機検証)
     - { name: snmp,  output_index: ot-logs-snmp-* }   # Phase7決定事項#106: cc_ups管理。SNMPは最も成熟したtshark対応
 
@@ -327,13 +354,31 @@ detection:
       # 想定していたセグメント間フロー方式(決定事項#64案A当初案)より単純
       # だったため、実装時にALLOWED_DNP3_SOURCESという素直なIP許可リストへ
       # 補正した(前身の実データへの忠実さを優先)。
+      #
+      # 【Phase9決定事項#138で1件→2件へ訂正】cc_scada_masterを実DNP3化
+      # した直後の実機確認で、sub_c_rtu(正当なアウトステーション、応答元
+      # 10.1.40.10)の周期Poll応答が毎回「unauthorized DNP3 source」として
+      # 誤検知され続けることを発見した。原因は単純: DNP3はマスタ→
+      # アウトステーションの要求とアウトステーション→マスタの応答という
+      # 双方向通信であり、応答パケットの送信元IPはアウトステーション自身
+      # (sub_c_rtu)になる。旧来の許可リストは「マスタ1件」しか想定して
+      # おらず、実際に双方向の正当な通信が流れて初めて露呈した抜けだった
+      # (前身ot_allowlist.csvの単一エントリを前提に据えたことの副作用でも
+      # ある——前身は片方向のみの模擬トラフィックしか扱っていなかった)。
+      # sub_c_rtu(10.1.40.10)を許可リストへ追加して解消。この2件は
+      # 「このゾーンでDNP3を話してよい正規の参加者(マスタとその配下の
+      # アウトステーション)」を表しており、リストを緩めたのではなく、
+      # 単一方向の想定を実態(双方向の通信)に合わせて補正したもの。
+      # 修正後、正当な周期Pollの往復では誤検知が発生せず、
+      # dnp3_zone_attack.py(第三のIPから送信)は引き続き検知することを
+      # 実機確認済み。
       type: sidecar
       host: zone_detector
       source: ../scenarios/legacy-power-grid-signals/zone_violation.py
       requires: [ requests ]
       config:
         ES_URL: http://elasticsearch:9200
-        ALLOWED_DNP3_SOURCES: "10.1.10.10"   # cc_scada_masterのみ許可(前身のot_allowlist.csvと同じ資産)
+        ALLOWED_DNP3_SOURCES: "10.1.10.10,10.1.40.10"   # cc_scada_master(マスタ)とsub_c_rtu(アウトステーション、応答元)
   # 評価ハーネスは detection の専用フィールドではなく、eval-harnessロールの
   # 資産(topology.assets の eval_harness)として表現する(決定事項#77)。
   # 正解ラベルの記録・突き合わせは、その資産へ載せたシナリオスクリプト

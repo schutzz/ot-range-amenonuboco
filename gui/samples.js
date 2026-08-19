@@ -84,7 +84,7 @@ window.AMENONUBOCO_SAMPLES = [
             "role": "l3-router"
           },
           {
-            "image": "python:3.10-slim",
+            "image": "../protocol-images/dnp3",
             "name": "cc_scada_master",
             "networks": [
               {
@@ -94,7 +94,7 @@ window.AMENONUBOCO_SAMPLES = [
             ],
             "overrides": {
               "cap_add": null,
-              "command": "( python3 -m http.server 20000 & wait )",
+              "command": "( MODE=outstation DEVICE_ID=10 LABEL=cc_scada_master_rx python3 /app/run.py &\n  MODE=master TARGET=10.1.40.10 DEVICE_ID=1 PEER_ID=20 INTERVAL=8 LABEL=cc_scada_master_poll python3 /app/run.py &\n  wait )\n",
               "environment": [],
               "ports": [],
               "sysctls": null
@@ -140,7 +140,7 @@ window.AMENONUBOCO_SAMPLES = [
             "role": "attacker-insider"
           },
           {
-            "image": "python:3.10-slim",
+            "image": "../protocol-images/dnp3",
             "name": "sub_c_rtu",
             "networks": [
               {
@@ -150,8 +150,13 @@ window.AMENONUBOCO_SAMPLES = [
             ],
             "overrides": {
               "cap_add": null,
-              "command": "( python3 -m http.server 20000 & wait )",
-              "environment": [],
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=outstation",
+                "LABEL=sub_c_rtu",
+                "DEVICE_ID=20",
+                "POINTS=4"
+              ],
               "ports": [],
               "sysctls": null
             },
