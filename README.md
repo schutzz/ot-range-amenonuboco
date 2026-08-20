@@ -1,6 +1,6 @@
 # Amenonuboco — Cyber Range as Code
 
-![status](https://img.shields.io/badge/status-Phase%2010%20(Digital%20Twin%20%26%20Impairment)-brightgreen)
+![status](https://img.shields.io/badge/status-Phase%2011%20Stage1%20(Smart%20Factory%20Protocols)-brightgreen)
 
 > **天沼矛（あめのぬぼこ）** — マニフェスト1枚から、OT/ICS向けサイバーレンジ（攻撃対象 + 計装 + 検知パイプライン）を動的にプロビジョニングするためのプラットフォーム。
 
@@ -173,15 +173,17 @@ python cli.py diagram   ../manifests/manufacturing-plant-reference.yaml
 
 ## ステータス
 
-**Phase 10（高解像度エミュレーション：Digital Twin ＆ 回線劣化 Impairment）が完了しました。** 15分野の器展開（Phase 9）と堅牢化（Phase 9.5）の上に以下の高度機能を統合しました。
+**Phase 11 Stage 1（スマートファクトリー特化プロトコル拡張 ＆ 演習用暗号鍵注入アーキテクチャ）が完了しました。** Phase 10（Digital Twin ＆ Impairment）の上に、以下の実用プロトコル資産と演習用復号パイプラインを統合しました。
 
-- **OT 回線劣化エミュレーション（`tc-netem`）**：セグメント定義に `impairment`（delay, jitter, loss, rate）を宣言するだけで、ゲートウェイの下り方向 egress に `tc-netem` および TBF 帯域制限を自動構成。レガシーシリアル変換器や微弱無線の劣悪回線を忠実に再現。
-- **物理プロセス連動（Digital Twin）**：資産定義に `physical_process`（`type: tank_level`, `observed_by: wtp_scada_master` 等）を宣言し、コンテナ内で Modbus サーバと離散時間物理モデルが連動。
-- **物理影響（Consequence）E2E 実証と可視化**：攻撃者による Modbus ポンプ強制 ON ➔ 水位上昇 ➔ 100% 超過（オーバーフロー被害）➔ `ot-logs-modbus-*` 構造化 ➔ Grafana ダッシュボードでの時系列相関可視化を縦通し実証。
-- **観測可能性の強制（決定事項#152 / #154）**：`observed_by` の必須化・別セグメント配置強制、および `mirror_to` セグメントへの `impairment` 禁止をスキーマ（Python）および GUI（JS）双方のバリデーションで保証。
-- **ブラウザ完結 GUI の拡張**：`impairment` および `physical_process` の設定フォームを GUI エディタに統合し、YAML エクスポートおよびパリティテスト（55 件）を完備。
+- **国内主力・半導体プロトコルの実コンテナ化**：三菱MELSEC（MCプロトコル/3E フレーム）、オムロンFINS、SECS/GEM（HSMS-SS）、MQTT(S) の4資産を `protocol-images/` に追加。既存9資産と同じ「サーバ／クライアントを実際に立て、tsharkがフィールドを抽出するところまで実機確認済み」規約に準拠。
+- **演習用暗号鍵注入アーキテクチャ（Dual-View Observation）**：`structuring.decryption`（TLS復号鍵ログ）・`structuring.dissector_plugins`（Lua dissector配線）をスキーマへ後方互換で追加し、`mqtt`/`secsgem` の TLS 通信を tshark 側で透過復号できるようにした（決定事項#155〜#165）。
+- **Luaプラグイン配線機構**：tshark にネイティブ dissector が無い MELSEC 向けに、Lua dissector をホストパス指定で `structurer` コンテナへ自動マウントする機構を実装。
+- **配線テストの拡充**：罠#036（宣言のみの器）の教訓を継承し、新規4資産・TLS復号・Lua配線について、マニフェスト入力からCompose出力までを通しで検証する配線テストを追加。
+- **実機検証で6件のバグを発見・修正**：`pytest` 全件PASSの状態から、さらに `docker build`／`docker run`／実プロトコル交換まで確認したところ、フレーミングバグ等の実装不具合6件（罠#037〜#042）を発見し修正した。「テストが緑＝実装が正しい」わけではないという教訓を実演した形。
 
-累計テスト件数は **414 件**（396 PASS / 18 SKIP、いずれも正常系）です。スキーマ・生成物・GUI（Python/JSのパリティを含む）・シナリオ資産をカバーする pytest スイートと GitHub Actions CI を継続して整備しています。
+累計テスト件数は **458 件**（436 PASS / 22 SKIP、いずれも正常系）です。スキーマ・生成物・GUI（Python/JSのパリティを含む）・シナリオ資産をカバーする pytest スイートと GitHub Actions CI を継続して整備しています。
+
+Stage 2（PROFINET・EtherCAT・CIP Security拡張）は次フェーズへ先送りしています。
 
 ### 開発
 
