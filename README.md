@@ -1,6 +1,7 @@
 # Amenonuboco — Cyber Range as Code
 
 ![status](https://img.shields.io/badge/status-Phase%2011%20Stage1%20(Smart%20Factory%20Protocols)-brightgreen)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 [![CI](https://github.com/schutzz/ot-range-amenonuboco/actions/workflows/ci.yml/badge.svg)](https://github.com/schutzz/ot-range-amenonuboco/actions/workflows/ci.yml)
 [![Deploy GUI to Pages](https://github.com/schutzz/ot-range-amenonuboco/actions/workflows/pages.yml/badge.svg)](https://github.com/schutzz/ot-range-amenonuboco/actions/workflows/pages.yml)
 [![Live GUI Demo](https://img.shields.io/badge/GUI-Live%20Demo-blue)](https://schutzz.github.io/ot-range-amenonuboco/)
@@ -202,7 +203,7 @@ pytest          # スキーマ検証・生成物・記法ガイド整合・シ�
 
 ## ライセンス
 
-（未定）
+[Apache License 2.0](./LICENSE)。改変を配布する場合はファイルへの変更告知（[LICENSE](./LICENSE) 第4条(b)）と [NOTICE](./NOTICE) の帰属表示の保持をお願いします。
 
 ---
 
