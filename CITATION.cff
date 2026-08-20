@@ -1,0 +1,37 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "Amenonuboco: Cyber Range as Code"
+abstract: >-
+  A manifest-driven dynamic provisioning platform for OT/ICS cyber ranges.
+  From a single declarative manifest (topology, instrumentation,
+  structuring, detection, and attack layers), Amenonuboco generates a
+  fully instrumented Docker-based range: transparent traffic mirroring,
+  a tshark-based real-time structuring pipeline, an auto-generated
+  self-contained HTML network diagram, and an optional encrypted-traffic
+  key-injection architecture (Dual-View Observation) for TLS-secured
+  industrial protocols. Covers 15 critical infrastructure sectors and 13
+  reusable protocol assets (Modbus/TCP, BACnet/IP, OPC UA, DNP3, SNMP,
+  DICOM, HL7, SIP, EtherNet/IP, FINS, MQTT(S), SECS/GEM, MELSEC, PROFINET,
+  EtherCAT), each verified with real client/server traffic captured and
+  structured by tshark.
+authors:
+  - family-names: Terayama
+    given-names: Daichi
+    alias: schutzz
+repository-code: "https://github.com/schutzz/ot-range-amenonuboco"
+url: "https://schutzz.github.io/ot-range-amenonuboco/"
+license: Apache-2.0
+version: 0.11.0
+date-released: "2026-08-20"
+keywords:
+  - cyber-range
+  - ot-security
+  - ics-security
+  - industrial-control-systems
+  - infrastructure-as-code
+  - manifest-driven-provisioning
+  - digital-twin
+  - network-security
+  - security-research
+  - encrypted-traffic-analysis
