@@ -1,6 +1,12 @@
 # Amenonuboco — Cyber Range as Code
 
 ![status](https://img.shields.io/badge/status-Phase%2011%20Stage1%20(Smart%20Factory%20Protocols)-brightgreen)
+[![CI](https://github.com/schutzz/ot-range-amenonuboco/actions/workflows/ci.yml/badge.svg)](https://github.com/schutzz/ot-range-amenonuboco/actions/workflows/ci.yml)
+[![Deploy GUI to Pages](https://github.com/schutzz/ot-range-amenonuboco/actions/workflows/pages.yml/badge.svg)](https://github.com/schutzz/ot-range-amenonuboco/actions/workflows/pages.yml)
+[![Live GUI Demo](https://img.shields.io/badge/GUI-Live%20Demo-blue)](https://schutzz.github.io/ot-range-amenonuboco/)
+![tests](https://img.shields.io/badge/tests-458%20(436%20pass%20%2F%2022%20skip)-brightgreen)
+![python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
+[![last commit](https://img.shields.io/github/last-commit/schutzz/ot-range-amenonuboco)](https://github.com/schutzz/ot-range-amenonuboco/commits/main)
 
 > **天沼矛（あめのぬぼこ）** — マニフェスト1枚から、OT/ICS向けサイバーレンジ（攻撃対象 + 計装 + 検知パイプライン）を動的にプロビジョニングするためのプラットフォーム。
 
