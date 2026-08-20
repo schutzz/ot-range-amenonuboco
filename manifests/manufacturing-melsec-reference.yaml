@@ -1,0 +1,177 @@
+# 天沼矛(Amenonuboco) Phase11 Stage1D: 国内製造業（三菱 MELSEC 主軸）のリファレンススライス。
+# Phase11-SmartFactoryProtocols.md の設計に基づく。
+#
+# 主軸プロトコル:
+#   MELSEC MC プロトコル（3E バイナリフレーム、TCP 5007）: 射出成形機・搬送ライン制御
+#   FINS（オムロン PLC, TCP 9600）: 品質検査・計測器
+#
+# 主軸シナリオ: 内部犯型ラダー改竄
+#   ① IT ネットワークへの foothold を持つ内部犯（または VPN 経由の外部攻撃者）が、
+#   ② MELSEC 経由で射出成形機（press_plc）の D レジスタ（金型圧力設定値）を改竄し、
+#   ③ 品質検査 PLC（quality_plc, FINS）が異常値を検出してアラートを上げるまでの
+#      時間差（MELSEC 改竄 → 不良品量産 → FINS アラート）を演習で体感させる。
+#
+# MELSEC の tshark dissector 配線（Phase11 決定事項#161）:
+#   structuring.dissector_plugins に Lua dissector を指定するサンプルをコメントで
+#   掲載する。実際の Lua ファイルは GitHub の mitsubishi-wireshark-plugin 等から
+#   取得してホスト側パスを指定する（本マニフェストではコメントアウト済み）。
+apiVersion: amenonuboco/v1alpha1
+kind: CyberRange
+metadata:
+  name: manufacturing-melsec-reference
+  description: 国内製造業（三菱 MELSEC 主軸）のリファレンススライス。MELSEC MC プロトコル + FINS によるラダー改竄演習シナリオ
+
+topology:
+  segments:
+    - { name: corp_it_lan,      cidr: 10.9.10.0/24, kind: it-core }
+    - { name: scada_dmz,        cidr: 10.9.15.0/24, kind: dmz }
+    - { name: press_line_lan,   cidr: 10.9.20.0/24, kind: ot-lan }  # 射出成形ライン (MELSEC)
+    - { name: quality_lan,      cidr: 10.9.30.0/24, kind: ot-lan }  # 品質検査ライン (FINS)
+    - { name: mirror_link,      cidr: 10.9.99.0/24, kind: observation }
+  routing:
+    gateway: factory_router
+  assets:
+    - name: factory_router
+      role: l3-router
+      image: debian:bullseye-slim
+      networks:
+        - { segment: corp_it_lan,    ip: 10.9.10.254 }
+        - { segment: scada_dmz,      ip: 10.9.15.254 }
+        - { segment: press_line_lan, ip: 10.9.20.254 }
+        - { segment: quality_lan,    ip: 10.9.30.254 }
+        - { segment: mirror_link,    ip: 10.9.99.254 }
+
+    # --- 射出成形ライン (MELSEC MC プロトコル) ---
+
+    - name: press_plc
+      # 射出成形機制御 PLC（三菱 FX5U 相当）。
+      # D レジスタ: D100=型締圧力[kPa], D101=射出速度[mm/s], D102=保圧時間[ms]
+      # 主軸シナリオ: D100 を攻撃者が改竄することで過加圧状態を作り出す。
+      role: ot-asset
+      image: ../protocol-images/melsec
+      networks:
+        - { segment: press_line_lan, ip: 10.9.20.10 }
+      overrides:
+        command: python3 /app/run.py
+        environment:
+          - MODE=server
+          - LABEL=press-plc
+
+    - name: press_hmi
+      # 射出成形ライン HMI（生産管理 PC からの SCADA ポーリング役）。
+      role: ot-asset
+      image: ../protocol-images/melsec
+      networks:
+        - { segment: scada_dmz, ip: 10.9.15.10 }
+      overrides:
+        command: python3 /app/run.py
+        environment:
+          - MODE=client
+          - TARGET=10.9.20.10
+          - INTERVAL=3
+          - LABEL=press-hmi
+
+    - name: conveyor_plc
+      # 搬送ラインの中継 PLC（三菱 QJ71E71 相当）。
+      # 成形完了品を検査ラインへ搬送するシーケンス制御。
+      role: ot-asset
+      image: ../protocol-images/melsec
+      networks:
+        - { segment: press_line_lan, ip: 10.9.20.11 }
+      overrides:
+        command: python3 /app/run.py
+        environment:
+          - MODE=server
+          - PORT=5008
+          - LABEL=conveyor-plc
+
+    # --- 品質検査ライン (FINS / オムロン) ---
+
+    - name: quality_plc
+      # 品質検査 PLC（オムロン CJ2M 相当）。
+      # DM チャンネル: DM0=外形寸法[μm], DM1=重量[g*10], DM2=不良フラグ
+      # 主軸シナリオ: press_plc 改竄 → 成形不良 → quality_plc が DM2=1 をセット → アラート。
+      role: ot-asset
+      image: ../protocol-images/fins
+      networks:
+        - { segment: quality_lan, ip: 10.9.30.10 }
+      overrides:
+        command: python3 /app/run.py
+        environment:
+          - MODE=server
+          - LABEL=quality-plc
+
+    - name: quality_hmi
+      # 品質検査ライン HMI。検査 PLC を定期的にポーリングして不良フラグを監視する。
+      role: ot-asset
+      image: ../protocol-images/fins
+      networks:
+        - { segment: scada_dmz, ip: 10.9.15.11 }
+      overrides:
+        command: python3 /app/run.py
+        environment:
+          - MODE=client
+          - TARGET=10.9.30.10
+          - INTERVAL=2
+          - LABEL=quality-hmi
+
+    # --- 攻撃者 ---
+
+    - name: attacker_insider
+      # 内部犯（または VPN 経由の外部攻撃者）。
+      # MELSEC MC プロトコルで press_plc の D100（型締圧力）を改竄する。
+      # 正規の SCADA クライアントと区別できない点が演習のポイント。
+      role: attacker-internal
+      image: ../protocol-images/melsec
+      networks:
+        - { segment: corp_it_lan, ip: 10.9.10.50 }
+      overrides:
+        command: python3 /app/run.py
+        environment:
+          - MODE=client
+          - TARGET=10.9.20.10
+          - INTERVAL=20
+          - LABEL=attacker-insider
+
+    # --- 観測・検知インフラ ---
+
+    - name: elasticsearch
+      role: detection-infra
+      image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+      networks:
+        - { segment: corp_it_lan, ip: 10.9.10.40 }
+      overrides:
+        environment:
+          - discovery.type=single-node
+          - xpack.security.enabled=false
+          - ES_JAVA_OPTS=-Xms512m -Xmx512m
+
+    - name: log_structurer
+      role: structurer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link,  ip: 10.9.99.60 }
+        - { segment: corp_it_lan,  ip: 10.9.10.60 }
+
+instrumentation:
+  mirror_to: mirror_link
+  exclude: []
+
+structuring:
+  engine: tshark
+  protocols:
+    # MELSEC MC プロトコルはネイティブ dissector 非対応。TCP ポート 5007/5008 で捕捉。
+    # dissector_plugins を指定すれば Lua による SLMP 解析が可能（下記コメント参照）。
+    - { name: "tcp.port == 5007", output_index: ot-logs-melsec-press-* }
+    - { name: "tcp.port == 5008", output_index: ot-logs-melsec-conveyor-* }
+    # FINS (オムロン) はネイティブ dissector あり
+    - { name: omron, output_index: ot-logs-fins-* }
+    # パケット破損メタデータ（Phase 9.5 決定事項#141）
+    - { name: _ws.malformed, output_index: ot-logs-malformed-* }
+  # Phase11 決定事項#161: MELSEC 用 Lua dissector 配線（コメントアウト済みサンプル）
+  # ホスト側に Lua ファイルを配置してから以下を有効化する:
+  #   1. GitHub から mitsubishi-wireshark-plugin (slmp.lua) を取得
+  #   2. ホスト側パスを指定して uncomment
+  # dissector_plugins:
+  #   - name: slmp-melsec
+  #     host_path: /opt/amenonuboco/dissectors/slmp.lua

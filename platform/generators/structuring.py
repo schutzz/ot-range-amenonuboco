@@ -82,9 +82,23 @@ def generate_structuring_commands(
     # Phase 9.5 決定事項#141: tsharkの表示フィルタ(proto.name)として `_ws.malformed`
     # (パケット破損) が指定された場合も、同様に `-Y "_ws.malformed"` として捉え、
     # 破損パケットのログを `ot-logs-malformed-*` 等のインデックスへ集約・検知転用する。
+    #
+    # Phase11 決定事項#160: decryption.tls.keylog_file が宣言されている場合、
+    # tshark コマンドに `-o tls.keylog_file:...` を追加し、TLS セッションをリアルタイム
+    # に復号する。これにより統裁者・SIEM 側では L7 平文を観測できる（演習用
+    # 暗号鍵注入アーキテクチャ）。decryption 非宣言時は一切影響しない。
+    tls_opts: list[str] = []
+    if structuring.decryption is not None:
+        if structuring.decryption.keylog_file:
+            tls_opts.append(f"-o tls.keylog_file:{structuring.decryption.keylog_file}")
+        if structuring.decryption.server_key:
+            tls_opts.append(f"-o tls.rsa_keys:{structuring.decryption.server_key}")
+
+    tls_opt_str = (" " + " ".join(tls_opts)) if tls_opts else ""
+
     launches = [
         (
-            f'tshark -i $STRUCT_IF -T ek -Y "{proto.name}" | '
+            f'tshark -i $STRUCT_IF -T ek -Y "{proto.name}"{tls_opt_str} | '
             f"python3 {BULK_LOADER_CONTAINER_PATH} "
             f'--index "{proto.output_index}" '
             f'--es-url "{structuring.elasticsearch_url}" &'
@@ -93,3 +107,4 @@ def generate_structuring_commands(
     ]
     commands.append(f"( {' '.join(launches)} wait )")
     return commands
+

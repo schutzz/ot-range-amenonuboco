@@ -80,8 +80,16 @@ def test_compose_yaml_dumps(compose_for):
 
 
 def _inner_command(cmd: str) -> str:
-    """`sh -c "..."` の中身を取り出し、Compose用の `$$` をシェルの `$` へ戻す。"""
-    return shlex.split(cmd)[-1].replace("$$", "$")
+    """`sh -c "..."` の中身を抽出する。Compose用の `$$` はシェル用の `$` に戻す。"""
+    if cmd.startswith('sh -c "') and cmd.endswith('"'):
+        # shlex.split だとエスケープされたクオート（\"）を含む場合に破綻することがあるため、
+        # 確実に中身だけを取り出してアンエスケープする。
+        inner = cmd[7:-1].replace('\\"', '"')
+        return inner.replace("$$", "$")
+    if cmd.startswith("sh -c '") and cmd.endswith("'"):
+        inner = cmd[7:-1]
+        return inner.replace("$$", "$")
+    return cmd
 
 
 def test_generated_commands_are_valid_shell(compose_for):

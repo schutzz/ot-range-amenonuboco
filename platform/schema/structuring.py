@@ -8,7 +8,7 @@ Phase3決定事項#39: 1プロトコル=1専用tsharkプロセス=1専用index�
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -29,6 +29,36 @@ class StructuringException(BaseModel):
     reason: str
 
 
+class TlsDecryptionConfig(BaseModel):
+    """演習用 TLS 復号設定（Phase11 決定事項#160）。
+
+    tshark の `-o tls.keylog_file` 機能を使い、SSLKEYLOGFILE 形式の鍵ログ
+    からリアルタイムに TLS セッションを復号する。structurer コンテナ側で
+    マウントされた鍵ファイルパスを tshark コマンドに渡す。
+
+    keylog_file: コンテナ内パス（compose.py がボリュームマウントを自動生成する）
+    server_key : RSA 秘密鍵パス（静的復号用・オプション）
+    """
+
+    keylog_file: Optional[str] = None
+    server_key: Optional[str] = None
+
+
+class DissectorPlugin(BaseModel):
+    """カスタム Wireshark Lua dissector の配線（Phase11 決定事項#161）。
+
+    tshark のネイティブ dissector が存在しないプロトコル（MELSEC 等）向けに、
+    ホスト側の Lua ファイルを structurer コンテナの Wireshark プラグイン
+    ディレクトリへマウントし、カスタム解析を有効化する。
+
+    name     : プラグイン識別名（ログ用）
+    host_path: ホスト側の .lua ファイルパス
+    """
+
+    name: str
+    host_path: str
+
+
 class Structuring(BaseModel):
     engine: Literal["tshark"] = "tshark"
     protocols: list[ProtocolMapping] = Field(default_factory=list)
@@ -39,6 +69,15 @@ class Structuring(BaseModel):
     # ことで、Elasticsearch資産の名前が変わっても壊れないようにする
     # (Phase3決定事項#43、計画書のスキーマ骨子から実装時に判明した抜けの補完)。
     elasticsearch_url: str = "http://elasticsearch:9200"
+
+    # Phase11 Stage1C: 演習用暗号鍵注入アーキテクチャ（後方互換・全 Optional）
+    # decryption を宣言すると、generators/structuring.py が tshark コマンドに
+    # `-o tls.keylog_file:...` を条件付きで追加し、generators/compose.py が
+    # structurer コンテナへの鍵ファイルボリュームマウントを自動生成する。
+    decryption: Optional[TlsDecryptionConfig] = None
+    # dissector_plugins を宣言すると、generators/compose.py が Lua ファイルを
+    # Wireshark プラグインディレクトリへマウントし、tshark がカスタム解析を行う。
+    dissector_plugins: list[DissectorPlugin] = Field(default_factory=list)
 
     # prefilter: 将来のプロトコル非依存(5-tuple/ポートベース)なeBPF事前フィルタ
     # 用の予約フィールド(決定事項#37)。Phase3では未実装のため、フィールド自体

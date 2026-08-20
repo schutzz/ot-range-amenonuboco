@@ -1,0 +1,208 @@
+# 天沼矛(Amenonuboco) Phase11 Stage1D: 半導体ファブ(Fab)分野のリファレンススライス。
+# Phase11-SmartFactoryProtocols.md の設計に基づく。
+#
+# 主軸プロトコル:
+#   FINS (オムロン PLC) : ウェハー搬送系の制御ネットワーク
+#   MQTT              : MES / IoT ゲートウェイ経由のセンサーデータ収集
+#   SECS/GEM (HSMS-SS) : 露光装置・CVD 装置等の半導体製造装置との標準通信
+#
+# 主軸シナリオ: サプライチェーン攻撃型
+#   ① IoT ゲートウェイ（mqtt_broker）に foothold を確立した攻撃者が、
+#   ② MQTT トピックにコマンドをパブリッシュして製造装置（equip_cvd）に
+#      プロセス変更命令を注入し、
+#   ③ SECS/GEM のイベントレポート（S6F11）で異常プロセス値が検出される
+#      という演習シナリオを再現する。
+#
+# 暗号鍵注入アーキテクチャ（Phase11 決定事項#160）の先行実装:
+#   structuring.decryption.keylog_file を宣言することで、統裁者・SIEM 側は
+#   MQTTS の暗号化通信を内部復号して平文で観測できる（受講者は暗号化のまま）。
+apiVersion: amenonuboco/v1alpha1
+kind: CyberRange
+metadata:
+  name: semiconductor-fab-reference
+  description: 半導体ファブ分野のリファレンススライス。FINS/MQTT/SECS-GEM を組み合わせたサプライチェーン攻撃シナリオを主軸実演とする
+
+topology:
+  segments:
+    - { name: fab_it_lan,       cidr: 10.8.10.0/24, kind: it-core }
+    - { name: fab_mes_dmz,      cidr: 10.8.15.0/24, kind: dmz }
+    - { name: fab_transfer_lan, cidr: 10.8.20.0/24, kind: ot-lan }    # ウェハー搬送系 (FINS)
+    - { name: fab_equip_lan,    cidr: 10.8.30.0/24, kind: ot-lan }    # 製造装置系 (SECS/GEM)
+    - { name: fab_iot_lan,      cidr: 10.8.40.0/24, kind: ot-lan }   # IoT ゲートウェイ (MQTT)
+    - { name: mirror_link,      cidr: 10.8.99.0/24, kind: observation }
+  routing:
+    gateway: fab_router
+  assets:
+    - name: fab_router
+      role: l3-router
+      image: debian:bullseye-slim
+      networks:
+        - { segment: fab_it_lan,       ip: 10.8.10.254 }
+        - { segment: fab_mes_dmz,      ip: 10.8.15.254 }
+        - { segment: fab_transfer_lan, ip: 10.8.20.254 }
+        - { segment: fab_equip_lan,    ip: 10.8.30.254 }
+        - { segment: fab_iot_lan,      ip: 10.8.40.254 }
+        - { segment: mirror_link,      ip: 10.8.99.254 }
+
+    # --- ウェハー搬送系 (FINS / オムロン PLC) ---
+
+    - name: transfer_plc
+      # ウェハー搬送ロボット制御 PLC（オムロン CP2E 相当）。
+      # DM チャンネルで搬送位置・速度・トルクを保持する。
+      role: ot-asset
+      image: ../protocol-images/fins
+      networks:
+        - { segment: fab_transfer_lan, ip: 10.8.20.10 }
+      overrides:
+        command: python3 /app/run.py
+        environment:
+          - MODE=server
+          - LABEL=transfer-plc
+
+    - name: transfer_hmi
+      # 搬送系 HMI / SCADA。PLC を定期的にポーリングする。
+      role: ot-asset
+      image: ../protocol-images/fins
+      networks:
+        - { segment: fab_mes_dmz, ip: 10.8.15.10 }
+      overrides:
+        command: python3 /app/run.py
+        environment:
+          - MODE=client
+          - TARGET=10.8.20.10
+          - INTERVAL=3
+          - LABEL=transfer-hmi
+
+    # --- IoT ゲートウェイ系 (MQTT) ---
+
+    - name: mqtt_broker
+      # IoT ゲートウェイ兼 MQTT ブローカー（サプライチェーン攻撃の foothold 対象）。
+      # TLS は演習用に平文で起動する（受講者が暗号化なしでトラフィックを観察できる
+      # 基本設定。MQTTS 演習版は semiconductor-fab-mqtts-reference.yaml を参照）。
+      role: ot-asset
+      image: ../protocol-images/mqtt
+      networks:
+        - { segment: fab_iot_lan, ip: 10.8.40.10 }
+      overrides:
+        command: python3 /app/run.py
+        environment:
+          - MODE=broker
+          - LABEL=iot-gw-broker
+
+    - name: mes_sensor_client
+      # MES（製造実行システム）の IoT データ収集エージェント。
+      # 各製造装置の環境センサーを定期的にパブリッシュする。
+      role: ot-asset
+      image: ../protocol-images/mqtt
+      networks:
+        - { segment: fab_mes_dmz, ip: 10.8.15.11 }
+      overrides:
+        command: python3 /app/run.py
+        environment:
+          - MODE=client
+          - TARGET=10.8.40.10
+          - TOPIC_ROOT=fab/cleanroom
+          - INTERVAL=5
+          - LABEL=mes-sensor-client
+
+    # --- 製造装置系 (SECS/GEM HSMS-SS) ---
+
+    - name: equip_cvd
+      # CVD（化学気相蒸着）装置の HSMS Equipment 役。
+      # SEMI E37 HSMS Select/Linktest + S1F1/S1F2/S6F11 を実装済み。
+      role: ot-asset
+      image: ../protocol-images/secsgem
+      networks:
+        - { segment: fab_equip_lan, ip: 10.8.30.10 }
+      overrides:
+        command: python3 /app/run.py
+        environment:
+          - MODE=server
+          - LABEL=equip-cvd
+
+    - name: equip_litho
+      # 露光装置（ArF 液浸スキャナー相当）の HSMS Equipment 役。
+      role: ot-asset
+      image: ../protocol-images/secsgem
+      networks:
+        - { segment: fab_equip_lan, ip: 10.8.30.11 }
+      overrides:
+        command: python3 /app/run.py
+        environment:
+          - MODE=server
+          - PORT=5001
+          - LABEL=equip-litho
+
+    - name: fab_host_controller
+      # Fab Host Controller（製造装置と SECS/GEM で通信する上位 MES）。
+      # CVD と露光装置の両方に対して S1F1（Are You There）と
+      # Linktest を定期送信し、装置の稼働状態を確認する。
+      role: ot-asset
+      image: ../protocol-images/secsgem
+      networks:
+        - { segment: fab_mes_dmz, ip: 10.8.15.20 }
+      overrides:
+        command: python3 /app/run.py
+        environment:
+          - MODE=client
+          - TARGET=10.8.30.10
+          - INTERVAL=10
+          - LABEL=fab-host-ctrl
+
+    # --- 攻撃者 ---
+
+    - name: attacker_supply_chain
+      # サプライチェーン侵害済みの踏み台（IoT ゲートウェイを起点に内部展開）。
+      # MQTT パブリッシュで製造装置パラメータ改竄コマンドを注入する。
+      role: attacker-internal
+      image: ../protocol-images/mqtt
+      networks:
+        - { segment: fab_iot_lan, ip: 10.8.40.50 }
+      overrides:
+        command: python3 /app/run.py
+        environment:
+          - MODE=client
+          - TARGET=10.8.40.10
+          - TOPIC_ROOT=fab/command
+          - INTERVAL=15
+          - LABEL=attacker-supply-chain
+
+    # --- 観測・検知インフラ ---
+
+    - name: elasticsearch
+      role: detection-infra
+      image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+      networks:
+        - { segment: fab_it_lan, ip: 10.8.10.40 }
+      overrides:
+        environment:
+          - discovery.type=single-node
+          - xpack.security.enabled=false
+          - ES_JAVA_OPTS=-Xms512m -Xmx512m
+
+    - name: log_structurer
+      role: structurer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link,  ip: 10.8.99.60 }
+        - { segment: fab_it_lan,   ip: 10.8.10.60 }
+
+instrumentation:
+  mirror_to: mirror_link
+  exclude: []
+
+structuring:
+  engine: tshark
+  protocols:
+    # FINS (オムロン) はネイティブ dissector あり (フィルタ: omron)
+    - { name: omron, output_index: ot-logs-fins-* }
+    # MQTT はネイティブ dissector あり (フィルタ: mqtt)
+    - { name: mqtt, output_index: ot-logs-mqtt-* }
+    # HSMS (SECS/GEM) はネイティブ dissector あり (フィルタ: hsms)
+    - { name: hsms, output_index: ot-logs-hsms-* }
+    # パケット破損メタデータ（Phase 9.5 決定事項#141）
+    - { name: _ws.malformed, output_index: ot-logs-malformed-* }
+  # Phase11 決定事項#160: 演習用暗号鍵注入アーキテクチャ
+  # MQTTS 演習を行う場合は以下のコメントを解除し、鍵ファイルパスを指定する。
+  # decryption:
+  #   keylog_file: /var/log/amenonuboco/sslkeylog.log

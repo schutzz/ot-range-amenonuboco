@@ -4667,5 +4667,628 @@ window.AMENONUBOCO_SAMPLES = [
         ]
       }
     }
+  },
+  {
+    "group": "器のみ・観測境界あり",
+    "id": "semiconductor-fab-reference",
+    "label": "半導体ファブ",
+    "model": {
+      "apiVersion": "amenonuboco/v1alpha1",
+      "instrumentation": {
+        "exclude": [],
+        "mirror_to": "mirror_link"
+      },
+      "kind": "CyberRange",
+      "metadata": {
+        "description": "半導体ファブ分野のリファレンススライス。FINS/MQTT/SECS-GEM を組み合わせたサプライチェーン攻撃シナリオを主軸実演とする",
+        "name": "semiconductor-fab-reference"
+      },
+      "structuring": {
+        "elasticsearch_url": "http://elasticsearch:9200",
+        "engine": "tshark",
+        "protocols": [
+          {
+            "name": "omron",
+            "output_index": "ot-logs-fins-*"
+          },
+          {
+            "name": "mqtt",
+            "output_index": "ot-logs-mqtt-*"
+          },
+          {
+            "name": "hsms",
+            "output_index": "ot-logs-hsms-*"
+          },
+          {
+            "name": "_ws.malformed",
+            "output_index": "ot-logs-malformed-*"
+          }
+        ]
+      },
+      "topology": {
+        "assets": [
+          {
+            "image": "debian:bullseye-slim",
+            "name": "fab_router",
+            "networks": [
+              {
+                "ip": "10.8.10.254",
+                "segment": "fab_it_lan"
+              },
+              {
+                "ip": "10.8.15.254",
+                "segment": "fab_mes_dmz"
+              },
+              {
+                "ip": "10.8.20.254",
+                "segment": "fab_transfer_lan"
+              },
+              {
+                "ip": "10.8.30.254",
+                "segment": "fab_equip_lan"
+              },
+              {
+                "ip": "10.8.40.254",
+                "segment": "fab_iot_lan"
+              },
+              {
+                "ip": "10.8.99.254",
+                "segment": "mirror_link"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": null,
+              "environment": [],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "l3-router"
+          },
+          {
+            "image": "../protocol-images/fins",
+            "name": "transfer_plc",
+            "networks": [
+              {
+                "ip": "10.8.20.10",
+                "segment": "fab_transfer_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=server",
+                "LABEL=transfer-plc"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/fins",
+            "name": "transfer_hmi",
+            "networks": [
+              {
+                "ip": "10.8.15.10",
+                "segment": "fab_mes_dmz"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=client",
+                "TARGET=10.8.20.10",
+                "INTERVAL=3",
+                "LABEL=transfer-hmi"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/mqtt",
+            "name": "mqtt_broker",
+            "networks": [
+              {
+                "ip": "10.8.40.10",
+                "segment": "fab_iot_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=broker",
+                "LABEL=iot-gw-broker"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/mqtt",
+            "name": "mes_sensor_client",
+            "networks": [
+              {
+                "ip": "10.8.15.11",
+                "segment": "fab_mes_dmz"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=client",
+                "TARGET=10.8.40.10",
+                "TOPIC_ROOT=fab/cleanroom",
+                "INTERVAL=5",
+                "LABEL=mes-sensor-client"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/secsgem",
+            "name": "equip_cvd",
+            "networks": [
+              {
+                "ip": "10.8.30.10",
+                "segment": "fab_equip_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=server",
+                "LABEL=equip-cvd"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/secsgem",
+            "name": "equip_litho",
+            "networks": [
+              {
+                "ip": "10.8.30.11",
+                "segment": "fab_equip_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=server",
+                "PORT=5001",
+                "LABEL=equip-litho"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/secsgem",
+            "name": "fab_host_controller",
+            "networks": [
+              {
+                "ip": "10.8.15.20",
+                "segment": "fab_mes_dmz"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=client",
+                "TARGET=10.8.30.10",
+                "INTERVAL=10",
+                "LABEL=fab-host-ctrl"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/mqtt",
+            "name": "attacker_supply_chain",
+            "networks": [
+              {
+                "ip": "10.8.40.50",
+                "segment": "fab_iot_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=client",
+                "TARGET=10.8.40.10",
+                "TOPIC_ROOT=fab/command",
+                "INTERVAL=15",
+                "LABEL=attacker-supply-chain"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "attacker-internal"
+          },
+          {
+            "image": "docker.elastic.co/elasticsearch/elasticsearch:8.12.0",
+            "name": "elasticsearch",
+            "networks": [
+              {
+                "ip": "10.8.10.40",
+                "segment": "fab_it_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": null,
+              "environment": [
+                "discovery.type=single-node",
+                "xpack.security.enabled=false",
+                "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "detection-infra"
+          },
+          {
+            "image": "debian:bullseye-slim",
+            "name": "log_structurer",
+            "networks": [
+              {
+                "ip": "10.8.99.60",
+                "segment": "mirror_link"
+              },
+              {
+                "ip": "10.8.10.60",
+                "segment": "fab_it_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": null,
+              "environment": [],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "structurer"
+          }
+        ],
+        "routing": {
+          "gateway": "fab_router"
+        },
+        "segments": [
+          {
+            "cidr": "10.8.10.0/24",
+            "kind": "it-core",
+            "name": "fab_it_lan"
+          },
+          {
+            "cidr": "10.8.15.0/24",
+            "kind": "dmz",
+            "name": "fab_mes_dmz"
+          },
+          {
+            "cidr": "10.8.20.0/24",
+            "kind": "ot-lan",
+            "name": "fab_transfer_lan"
+          },
+          {
+            "cidr": "10.8.30.0/24",
+            "kind": "ot-lan",
+            "name": "fab_equip_lan"
+          },
+          {
+            "cidr": "10.8.40.0/24",
+            "kind": "ot-lan",
+            "name": "fab_iot_lan"
+          },
+          {
+            "cidr": "10.8.99.0/24",
+            "kind": "observation",
+            "name": "mirror_link"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "group": "器のみ・観測境界あり",
+    "id": "manufacturing-melsec-reference",
+    "label": "製造業(MELSEC)",
+    "model": {
+      "apiVersion": "amenonuboco/v1alpha1",
+      "instrumentation": {
+        "exclude": [],
+        "mirror_to": "mirror_link"
+      },
+      "kind": "CyberRange",
+      "metadata": {
+        "description": "国内製造業（三菱 MELSEC 主軸）のリファレンススライス。MELSEC MC プロトコル + FINS によるラダー改竄演習シナリオ",
+        "name": "manufacturing-melsec-reference"
+      },
+      "structuring": {
+        "elasticsearch_url": "http://elasticsearch:9200",
+        "engine": "tshark",
+        "protocols": [
+          {
+            "name": "tcp.port == 5007",
+            "output_index": "ot-logs-melsec-press-*"
+          },
+          {
+            "name": "tcp.port == 5008",
+            "output_index": "ot-logs-melsec-conveyor-*"
+          },
+          {
+            "name": "omron",
+            "output_index": "ot-logs-fins-*"
+          },
+          {
+            "name": "_ws.malformed",
+            "output_index": "ot-logs-malformed-*"
+          }
+        ]
+      },
+      "topology": {
+        "assets": [
+          {
+            "image": "debian:bullseye-slim",
+            "name": "factory_router",
+            "networks": [
+              {
+                "ip": "10.9.10.254",
+                "segment": "corp_it_lan"
+              },
+              {
+                "ip": "10.9.15.254",
+                "segment": "scada_dmz"
+              },
+              {
+                "ip": "10.9.20.254",
+                "segment": "press_line_lan"
+              },
+              {
+                "ip": "10.9.30.254",
+                "segment": "quality_lan"
+              },
+              {
+                "ip": "10.9.99.254",
+                "segment": "mirror_link"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": null,
+              "environment": [],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "l3-router"
+          },
+          {
+            "image": "../protocol-images/melsec",
+            "name": "press_plc",
+            "networks": [
+              {
+                "ip": "10.9.20.10",
+                "segment": "press_line_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=server",
+                "LABEL=press-plc"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/melsec",
+            "name": "press_hmi",
+            "networks": [
+              {
+                "ip": "10.9.15.10",
+                "segment": "scada_dmz"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=client",
+                "TARGET=10.9.20.10",
+                "INTERVAL=3",
+                "LABEL=press-hmi"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/melsec",
+            "name": "conveyor_plc",
+            "networks": [
+              {
+                "ip": "10.9.20.11",
+                "segment": "press_line_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=server",
+                "PORT=5008",
+                "LABEL=conveyor-plc"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/fins",
+            "name": "quality_plc",
+            "networks": [
+              {
+                "ip": "10.9.30.10",
+                "segment": "quality_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=server",
+                "LABEL=quality-plc"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/fins",
+            "name": "quality_hmi",
+            "networks": [
+              {
+                "ip": "10.9.15.11",
+                "segment": "scada_dmz"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=client",
+                "TARGET=10.9.30.10",
+                "INTERVAL=2",
+                "LABEL=quality-hmi"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/melsec",
+            "name": "attacker_insider",
+            "networks": [
+              {
+                "ip": "10.9.10.50",
+                "segment": "corp_it_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=client",
+                "TARGET=10.9.20.10",
+                "INTERVAL=20",
+                "LABEL=attacker-insider"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "attacker-internal"
+          },
+          {
+            "image": "docker.elastic.co/elasticsearch/elasticsearch:8.12.0",
+            "name": "elasticsearch",
+            "networks": [
+              {
+                "ip": "10.9.10.40",
+                "segment": "corp_it_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": null,
+              "environment": [
+                "discovery.type=single-node",
+                "xpack.security.enabled=false",
+                "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "detection-infra"
+          },
+          {
+            "image": "debian:bullseye-slim",
+            "name": "log_structurer",
+            "networks": [
+              {
+                "ip": "10.9.99.60",
+                "segment": "mirror_link"
+              },
+              {
+                "ip": "10.9.10.60",
+                "segment": "corp_it_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": null,
+              "environment": [],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "structurer"
+          }
+        ],
+        "routing": {
+          "gateway": "factory_router"
+        },
+        "segments": [
+          {
+            "cidr": "10.9.10.0/24",
+            "kind": "it-core",
+            "name": "corp_it_lan"
+          },
+          {
+            "cidr": "10.9.15.0/24",
+            "kind": "dmz",
+            "name": "scada_dmz"
+          },
+          {
+            "cidr": "10.9.20.0/24",
+            "kind": "ot-lan",
+            "name": "press_line_lan"
+          },
+          {
+            "cidr": "10.9.30.0/24",
+            "kind": "ot-lan",
+            "name": "quality_lan"
+          },
+          {
+            "cidr": "10.9.99.0/24",
+            "kind": "observation",
+            "name": "mirror_link"
+          }
+        ]
+      }
+    }
   }
 ];

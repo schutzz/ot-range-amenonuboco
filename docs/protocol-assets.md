@@ -1,6 +1,6 @@
 # プロトコル資産の使い方
 
-`protocol-images/` には、産業用・分野特化のプロトコルを話す小さなDockerイメージが9つ置いてあります。マニフェストから参照するだけで、**実際にそのプロトコルの通信が発生する資産**を配置できます。
+`protocol-images/` には、産業用・分野特化のプロトコルを話す小さなDockerイメージが13置いてあります。マニフェストから参照するだけで、**実際にそのプロトコルの通信が発生する資産**を配置できます。
 
 これは15分野のリファレンスを組むための内部部品ではなく、**あなたが自分のレンジを組むときに再利用する部品**です。この文書はそのための手引きです。
 
@@ -78,7 +78,7 @@ image: ../protocol-images/modbus
 
 ---
 
-## 4. 9つのイメージ
+## 4. 13のイメージ
 
 すべて「サーバ／クライアントを立てて、tsharkが実際にフィールドを抽出するところまで」を実機で確認済みです。「実測フィールド数」はその際に観測できた、そのプロトコル層の異なるフィールド名の数です。
 
@@ -93,6 +93,12 @@ image: ../protocol-images/modbus
 | `hl7` | HL7 v2 over MLLP | `hl7` | 2575/tcp | 2（粗い） |
 | `sip` | SIP | `sip` | 5060/udp | 46 |
 | `enip` | EtherNet/IP (CIP) | `enip` | 44818/tcp | 16（＋CIP層32） |
+| `fins` | OMRON FINS | `omron` | 9600/tcp | — |
+| `mqtt` | MQTT(S) | `mqtt` | 1883/tcp (TLS:8883) | — |
+| `secsgem` | SECS/GEM (HSMS-SS) | `hsms` | 5000/tcp | — |
+| `melsec` | 三菱 MCプロトコル(3E) | `tcp.port == 5007` | 5007/tcp | — (※1) |
+
+*(※1) MELSECはtsharkネイティブディセクタがないため、`tcp.port` フィルタで捕捉後、Luaプラグインをマウントして解析する運用（詳細は後述）。*
 
 > **`structuring.protocols[].name` はtsharkの表示フィルタ名です。** プロトコルの通称とは限りません。BACnetは `bacapp`、DICOMは `dicom`（`dcm` ではありません）。外すと、ディセクタは正常に動いているのに**そのプロトコルだけレコードが0件**になります。詳しくは第7節を参照してください。
 
@@ -190,6 +196,37 @@ UACは REGISTER → INVITE → ACK → BYE という1本の呼を周期的に流
 
 **実測で取れるもの**: `enip.command`、`enip.session`、`enip.context`。加えて**CIP層が独立したレイヤ `cip` として現れます**——`cip.service` が 0x01 / 0x0E / 0x10（応答は最上位ビットが立って 0x81 / 0x8E / 0x90）、Identity応答から `cip.id.vendor_id`・`cip.id.product_name`・`cip.id.serial_number`。
 
+### `fins`
+
+`MODE`: `server` / `client`。`PORT`（既定 9600）。
+オムロン PLC (FINS over TCP) の通信を再現します。クライアント側では `TARGET` を指定します。
+内部では DM エリア（データメモリ）の読み書きコマンド（`01 01` / `01 02`）が発行されます。
+
+**実測で取れるもの**: `omron.header.icf`、`omron.header.da1`、`omron.command_code` など FINS ヘッダ・コマンド層フィールド。
+
+### `mqtt`
+
+`MODE`: `broker` / `client`。`PORT`（平文1883、TLS時8883）。
+Mosquitto ブローカーと paho-mqtt クライアントの組み合わせ。
+`TLS_ENABLE=true` にすると MQTTS になります。`SSLKEYLOGFILE` 環境変数を設定すると、Phase11 暗号鍵注入アーキテクチャにより、マニフェストから TLS 復号（`decryption.keylog_file`）が可能になります。
+
+**実測で取れるもの**: `mqtt.msgtype` (Connect / Publish / Subscribe 等)、`mqtt.topic`、`mqtt.msg` など。
+
+### `secsgem`
+
+`MODE`: `server` (Equipment役) / `client` (Host役)。`PORT`（既定 5000）。
+半導体製造装置向けの SECS/GEM HSMS-SS。Select/Linktest などの HSMS 制御メッセージと、S1F1/S1F2、S6F11 (Event Report) などの SECS-II メッセージが流れます。
+`TLS_ENABLE=true` で HSMS-SS over TLS になり、MQTT同等の暗号鍵注入が機能します。
+
+**実測で取れるもの**: `hsms.length`、`hsms.session`、`hsms.stype` など。SECS-II メッセージ層（SxFy）はペイロード内に存在します。
+
+### `melsec`
+
+`MODE`: `server` / `client`。`PORT`（既定 5007）。
+三菱 MELSEC MC プロトコル 3E フレーム（バイナリモード）の通信。クライアントは Dレジスタの読み書き（0x0401 / 0x1401 コマンド）を行います。
+
+**実測で取れるもの**: tshark のネイティブディセクタが存在しないため、単体では `_ws.malformed` や `data` として扱われます。マニフェストの `structuring.dissector_plugins` に有志の Lua プラグイン（`slmp.lua` 等）をホストパス指定でマウントすることで、独自の解析フィールド（`slmp.command` 等）が抽出可能になります。
+
 ---
 
 ## 6. `structuring` 層への書き方
@@ -229,7 +266,7 @@ structuring:
 
 ### 起動が遅い
 
-初回は `docker compose up` でイメージのビルドが走ります。9つすべてを使う場合は数分かかります。2回目以降はレイヤキャッシュが効きます。
+初回は `docker compose up` でイメージのビルドが走ります。13すべてを使う場合は数分かかります。2回目以降はレイヤキャッシュが効きます。
 
 ### コンテナがすぐ終了する
 
@@ -239,7 +276,7 @@ structuring:
 
 ## 8. 自分のプロトコルを足す
 
-`protocol-images/<name>/` に `Dockerfile` と起動スクリプトを置き、マニフェストから `image: ../protocol-images/<name>` で参照するだけです。既存の9つに倣うなら:
+`protocol-images/<name>/` に `Dockerfile` と起動スクリプトを置き、マニフェストから `image: ../protocol-images/<name>` で参照するだけです。既存の13に倣うなら:
 
 - `MODE` でサーバ／クライアントを切り替える
 - 接続失敗で異常終了せず、次の周期で再試行する（起動順序に依存しない器にするため）

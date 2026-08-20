@@ -27,6 +27,13 @@ from schema import (
     resolve_effective_attributes,
 )
 
+# Phase11 Stage1C: Wireshark プラグインディレクトリ（Debian/Ubuntu の tshark がデフォルトで
+# 読み込む位置）。structurer コンテナ内で Lua dissector を有効化するためにマウントする
+# （決定事項#161）。Wireshark のバージョンや OS によってパスが変わりうるが、Debian系
+# の tshark パッケージでは /usr/lib/x86_64-linux-gnu/wireshark/plugins/ が既定のため、
+# ここを固定マウント先とする。ARM 系ホストでの動作は未保証（既知制約として明記）。
+_WIRESHARK_PLUGIN_CONTAINER_DIR = "/usr/lib/x86_64-linux-gnu/wireshark/plugins"
+
 from .attack import (
     AttackGenerationError,
     caldera_volume_mounts,
@@ -418,6 +425,28 @@ def _service_block(
         volumes.append(
             f"{BULK_LOADER_HOST_PATH.as_posix()}:{BULK_LOADER_CONTAINER_PATH}:ro"
         )
+        # Phase11 決定事項#160: TLS 復号用鍵ファイルのマウント。
+        # structuring.decryption.keylog_file が宣言されている場合のみ追加する。
+        # ホスト側パス = コンテナ内パスと同一にする（演習環境では共有ボリューム
+        # を使うことが多く、マッピングが1:1の方が運用がシンプル）。
+        if structuring is not None and structuring.decryption is not None:
+            if structuring.decryption.keylog_file:
+                kf = structuring.decryption.keylog_file
+                volumes.append(f"{kf}:{kf}:ro")
+            if structuring.decryption.server_key:
+                sk = structuring.decryption.server_key
+                volumes.append(f"{sk}:{sk}:ro")
+        # Phase11 決定事項#161: Lua dissector のマウント。
+        # dissector_plugins が1件以上宣言されている場合のみ追加する。
+        # ホスト側 .lua ファイルを Wireshark プラグインディレクトリへ読み取り専用
+        # でマウントすることで、tshark が起動時に自動ロードする。
+        if structuring is not None and structuring.dissector_plugins:
+            for plugin in structuring.dissector_plugins:
+                import os as _os
+                fname = _os.path.basename(plugin.host_path)
+                volumes.append(
+                    f"{plugin.host_path}:{_WIRESHARK_PLUGIN_CONTAINER_DIR}/{fname}:ro"
+                )
     if detection is not None:
         # 検知プラグイン本体を読み取り専用でマウントする(Phase4、決定事項#46と
         # 同じ絶対パス方式)。
