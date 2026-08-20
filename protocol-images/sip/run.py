@@ -48,6 +48,17 @@ def env_int(name: str, default: int) -> int:
         return default
 
 
+def env_float(name: str, default: float) -> float:
+    # env_int()はint()でパースするため"0.05"のような小数秒はValueErrorで
+    # 黙ってdefaultにフォールバックしてしまう（Phase12罠、負荷試験で
+    # INTERVAL=0.05を指定しても無視され既定の5秒間隔で動いていた）。
+    # 秒単位の間隔（INTERVAL等）は必ずこちらを使う。
+    try:
+        return float(env(name) or default)
+    except ValueError:
+        return default
+
+
 LABEL = env("LABEL", "sip")
 PORT = env_int("PORT", 5060)
 DOMAIN = env("DOMAIN", "range.invalid")
@@ -169,7 +180,7 @@ def run_uac() -> None:
 
     user = env("USER", "phone1")
     peer_user = env("PEER_USER", "pbx")
-    interval = env_int("INTERVAL", 10)
+    interval = env_float("INTERVAL", 10)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(("0.0.0.0", PORT))

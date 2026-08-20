@@ -98,7 +98,14 @@ def generate_structuring_commands(
 
     launches = [
         (
-            f'tshark -i $STRUCT_IF -T ek -Y "{proto.name}"{tls_opt_str} | '
+            # `-l`（行バッファ強制）が無いと、パイプ出力はフルバッファリング
+            # （既定で数KB）される。低〜中頻度のプロトコルではバッファが
+            # なかなか埋まらず、bulk_loader.pyへデータが渡らないまま
+            # Elasticsearchに何も投入されない（Phase12罠、負荷試験で
+            # OPC UA/DNP3が実トラフィックはあるのにESに0件のまま観測された）。
+            # 「リアルタイム構造化」を謳う以上、バッファリングによる遅延・
+            # 未フラッシュは許容できないため常に付与する。
+            f'tshark -i $STRUCT_IF -T ek -Y "{proto.name}"{tls_opt_str} -l | '
             f"python3 {BULK_LOADER_CONTAINER_PATH} "
             f'--index "{proto.output_index}" '
             f'--es-url "{structuring.elasticsearch_url}" &'

@@ -52,6 +52,17 @@ def env_int(name: str, default: int) -> int:
         return default
 
 
+def env_float(name: str, default: float) -> float:
+    # env_int()はint()でパースするため"0.05"のような小数秒はValueErrorで
+    # 黙ってdefaultにフォールバックしてしまう（Phase12罠、負荷試験で
+    # INTERVAL=0.05を指定しても無視され既定の5秒間隔で動いていた）。
+    # 秒単位の間隔（INTERVAL等）は必ずこちらを使う。
+    try:
+        return float(env(name) or default)
+    except ValueError:
+        return default
+
+
 LABEL = env("LABEL", "dicom")
 PORT = env_int("PORT", 104)
 
@@ -129,7 +140,7 @@ def run_scu() -> None:
 
     ae_title = env("AE_TITLE", "RANGE_MOD")
     peer_ae = env("PEER_AE", "RANGE_PACS")
-    interval = env_int("INTERVAL", 5)
+    interval = env_float("INTERVAL", 5)
 
     ae = AE(ae_title=ae_title)
     ae.add_requested_context(Verification)

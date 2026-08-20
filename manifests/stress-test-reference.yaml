@@ -1,0 +1,151 @@
+apiVersion: amenonuboco/v1alpha1
+kind: CyberRange
+metadata:
+  name: stress-test-reference
+  description: >
+    Phase 12 パフォーマンス計測用マニフェスト。
+    ジェネレータ、構造化パイプライン、Elasticsearchのみを繋いだミニマル構成。
+
+topology:
+  routing:
+    gateway: wan_router
+  segments:
+    - { name: cc_lan,       cidr: 10.1.10.0/24, kind: it-core }
+    - { name: ot_lan,       cidr: 10.1.20.0/24, kind: ot-lan }
+    - { name: mirror_link,  cidr: 192.168.100.0/24, kind: observation }
+    - { name: es_link,      cidr: 192.168.200.0/24, kind: it-core }
+
+  assets:
+    - name: wan_router
+      role: l3-router
+      image: debian:bullseye-slim
+      networks:
+        - { segment: cc_lan,       ip: 10.1.10.254 }
+        - { segment: ot_lan,       ip: 10.1.20.254 }
+        - { segment: mirror_link,  ip: 192.168.100.254 }
+        - { segment: es_link,      ip: 192.168.200.254 }
+
+    - name: elasticsearch
+      role: detection-infra
+      image: docker.elastic.co/elasticsearch/elasticsearch:8.10.2
+      networks:
+        - { segment: es_link, ip: 192.168.200.10 }
+      overrides:
+        environment:
+          - "discovery.type=single-node"
+          - "xpack.security.enabled=false"
+          - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+        ports:
+          - "9200:9200"
+
+    - name: log_structurer
+      role: structurer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link, ip: 192.168.100.60 }
+        - { segment: es_link,     ip: 192.168.200.60 }
+
+    # ================= Scenario A: Single Protocol Flood (Modbus) =================
+    - name: sc_a_modbus_server
+      role: ot-asset
+      image: ../protocol-images/modbus
+      networks:
+        - { segment: ot_lan, ip: 10.1.20.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=server"
+
+    - name: sc_a_modbus_client
+      role: ot-asset
+      image: ../protocol-images/modbus
+      networks:
+        - { segment: cc_lan, ip: 10.1.10.10 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=client"
+          - "TARGET=10.1.20.10"
+          - "INTERVAL=0.001" # 20pps
+
+    # ================= Scenario B: Multi Protocol (OPCUA, DNP3, ENIP) =================
+    - name: sc_b_opcua_server
+      role: ot-asset
+      image: ../protocol-images/opcua
+      networks:
+        - { segment: ot_lan, ip: 10.1.20.11 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=server"
+
+    - name: sc_b_opcua_client
+      role: ot-asset
+      image: ../protocol-images/opcua
+      networks:
+        - { segment: cc_lan, ip: 10.1.10.11 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=client"
+          - "TARGET=10.1.20.11"
+          - "INTERVAL=0.001"
+
+    - name: sc_b_dnp3_server
+      role: ot-asset
+      image: ../protocol-images/dnp3
+      networks:
+        - { segment: ot_lan, ip: 10.1.20.12 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=outstation"
+
+    - name: sc_b_dnp3_client
+      role: ot-asset
+      image: ../protocol-images/dnp3
+      networks:
+        - { segment: cc_lan, ip: 10.1.10.12 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=master"
+          - "TARGET=10.1.20.12"
+          - "INTERVAL=0.001"
+
+    # ================= Scenario C: L2 Flood (PROFINET) =================
+    - name: sc_c_profinet_client1
+      role: ot-asset
+      image: ../protocol-images/profinet
+      networks:
+        - { segment: ot_lan, ip: 10.1.20.13 }
+      overrides:
+        command: "python3 -u /app/run.py"
+        cap_add: [ "NET_ADMIN", "NET_RAW" ]
+        environment:
+          - "MODE=client"
+          - "INTERVAL=0.001" # 100pps
+
+    - name: sc_c_profinet_client2
+      role: ot-asset
+      image: ../protocol-images/profinet
+      networks:
+        - { segment: ot_lan, ip: 10.1.20.14 }
+      overrides:
+        command: "python3 -u /app/run.py"
+        cap_add: [ "NET_ADMIN", "NET_RAW" ]
+        environment:
+          - "MODE=client"
+          - "INTERVAL=0.001" # 100pps
+
+instrumentation:
+  mirror_to: mirror_link
+  exclude: []
+
+structuring:
+  engine: tshark
+  protocols:
+    - { name: modbus, output_index: ot-logs-modbus-* }
+    - { name: opcua,  output_index: ot-logs-opcua-* }
+    - { name: dnp3,   output_index: ot-logs-dnp3-* }
+    - { name: pn_rt,  output_index: ot-logs-pn_rt-* }

@@ -5520,5 +5520,323 @@ window.AMENONUBOCO_SAMPLES = [
         ]
       }
     }
+  },
+  {
+    "group": "器のみ",
+    "id": "stress-test-reference",
+    "label": "パフォーマンス計測",
+    "model": {
+      "apiVersion": "amenonuboco/v1alpha1",
+      "instrumentation": {
+        "exclude": [],
+        "mirror_to": "mirror_link"
+      },
+      "kind": "CyberRange",
+      "metadata": {
+        "description": "Phase 12 パフォーマンス計測用マニフェスト。 ジェネレータ、構造化パイプライン、Elasticsearchのみを繋いだミニマル構成。\n",
+        "name": "stress-test-reference"
+      },
+      "structuring": {
+        "elasticsearch_url": "http://elasticsearch:9200",
+        "engine": "tshark",
+        "protocols": [
+          {
+            "name": "modbus",
+            "output_index": "ot-logs-modbus-*"
+          },
+          {
+            "name": "opcua",
+            "output_index": "ot-logs-opcua-*"
+          },
+          {
+            "name": "dnp3",
+            "output_index": "ot-logs-dnp3-*"
+          },
+          {
+            "name": "pn_rt",
+            "output_index": "ot-logs-pn_rt-*"
+          }
+        ]
+      },
+      "topology": {
+        "assets": [
+          {
+            "image": "debian:bullseye-slim",
+            "name": "wan_router",
+            "networks": [
+              {
+                "ip": "10.1.10.254",
+                "segment": "cc_lan"
+              },
+              {
+                "ip": "10.1.20.254",
+                "segment": "ot_lan"
+              },
+              {
+                "ip": "192.168.100.254",
+                "segment": "mirror_link"
+              },
+              {
+                "ip": "192.168.200.254",
+                "segment": "es_link"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": null,
+              "environment": [],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "l3-router"
+          },
+          {
+            "image": "docker.elastic.co/elasticsearch/elasticsearch:8.10.2",
+            "name": "elasticsearch",
+            "networks": [
+              {
+                "ip": "192.168.200.10",
+                "segment": "es_link"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": null,
+              "environment": [
+                "discovery.type=single-node",
+                "xpack.security.enabled=false",
+                "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+              ],
+              "ports": [
+                "9200:9200"
+              ],
+              "sysctls": null
+            },
+            "role": "detection-infra"
+          },
+          {
+            "image": "debian:bullseye-slim",
+            "name": "log_structurer",
+            "networks": [
+              {
+                "ip": "192.168.100.60",
+                "segment": "mirror_link"
+              },
+              {
+                "ip": "192.168.200.60",
+                "segment": "es_link"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": null,
+              "environment": [],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "structurer"
+          },
+          {
+            "image": "../protocol-images/modbus",
+            "name": "sc_a_modbus_server",
+            "networks": [
+              {
+                "ip": "10.1.20.10",
+                "segment": "ot_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=server"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/modbus",
+            "name": "sc_a_modbus_client",
+            "networks": [
+              {
+                "ip": "10.1.10.10",
+                "segment": "cc_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=client",
+                "TARGET=10.1.20.10",
+                "INTERVAL=0.001"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/opcua",
+            "name": "sc_b_opcua_server",
+            "networks": [
+              {
+                "ip": "10.1.20.11",
+                "segment": "ot_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=server"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/opcua",
+            "name": "sc_b_opcua_client",
+            "networks": [
+              {
+                "ip": "10.1.10.11",
+                "segment": "cc_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=client",
+                "TARGET=10.1.20.11",
+                "INTERVAL=0.001"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/dnp3",
+            "name": "sc_b_dnp3_server",
+            "networks": [
+              {
+                "ip": "10.1.20.12",
+                "segment": "ot_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=outstation"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/dnp3",
+            "name": "sc_b_dnp3_client",
+            "networks": [
+              {
+                "ip": "10.1.10.12",
+                "segment": "cc_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=master",
+                "TARGET=10.1.20.12",
+                "INTERVAL=0.001"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/profinet",
+            "name": "sc_c_profinet_client1",
+            "networks": [
+              {
+                "ip": "10.1.20.13",
+                "segment": "ot_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": [
+                "NET_ADMIN",
+                "NET_RAW"
+              ],
+              "command": "python3 -u /app/run.py",
+              "environment": [
+                "MODE=client",
+                "INTERVAL=0.001"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/profinet",
+            "name": "sc_c_profinet_client2",
+            "networks": [
+              {
+                "ip": "10.1.20.14",
+                "segment": "ot_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": [
+                "NET_ADMIN",
+                "NET_RAW"
+              ],
+              "command": "python3 -u /app/run.py",
+              "environment": [
+                "MODE=client",
+                "INTERVAL=0.001"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          }
+        ],
+        "routing": {
+          "gateway": "wan_router"
+        },
+        "segments": [
+          {
+            "cidr": "10.1.10.0/24",
+            "kind": "it-core",
+            "name": "cc_lan"
+          },
+          {
+            "cidr": "10.1.20.0/24",
+            "kind": "ot-lan",
+            "name": "ot_lan"
+          },
+          {
+            "cidr": "192.168.100.0/24",
+            "kind": "observation",
+            "name": "mirror_link"
+          },
+          {
+            "cidr": "192.168.200.0/24",
+            "kind": "it-core",
+            "name": "es_link"
+          }
+        ]
+      }
+    }
   }
 ];

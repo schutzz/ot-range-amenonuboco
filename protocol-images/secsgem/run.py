@@ -59,6 +59,17 @@ def env_int(name: str, default: int) -> int:
         return default
 
 
+def env_float(name: str, default: float) -> float:
+    # env_int()はint()でパースするため"0.05"のような小数秒はValueErrorで
+    # 黙ってdefaultにフォールバックしてしまう（Phase12罠、負荷試験で
+    # INTERVAL=0.05を指定しても無視され既定の5秒間隔で動いていた）。
+    # 秒単位の間隔（INTERVAL等）は必ずこちらを使う。
+    try:
+        return float(env(name) or default)
+    except ValueError:
+        return default
+
+
 LABEL = env("LABEL", "secsgem")
 TLS_ENABLE = env("TLS_ENABLE", "false").lower() == "true"
 PORT = env_int("PORT", 5000)
@@ -313,7 +324,7 @@ def run_client() -> None:
         log("TARGET が未設定です（MODE=client では接続先IPが必須）")
         sys.exit(1)
 
-    interval = env_int("INTERVAL", 10)
+    interval = env_float("INTERVAL", 10)
     ssl_ctx = _make_ssl_context_client()
 
     log(f"connecting to {target}:{PORT} (tls={TLS_ENABLE})")

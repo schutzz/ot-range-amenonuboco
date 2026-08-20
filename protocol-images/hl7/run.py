@@ -56,6 +56,17 @@ def env_int(name: str, default: int) -> int:
         return default
 
 
+def env_float(name: str, default: float) -> float:
+    # env_int()はint()でパースするため"0.05"のような小数秒はValueErrorで
+    # 黙ってdefaultにフォールバックしてしまう（Phase12罠、負荷試験で
+    # INTERVAL=0.05を指定しても無視され既定の5秒間隔で動いていた）。
+    # 秒単位の間隔（INTERVAL等）は必ずこちらを使う。
+    try:
+        return float(env(name) or default)
+    except ValueError:
+        return default
+
+
 LABEL = env("LABEL", "hl7")
 PORT = env_int("PORT", 2575)
 FACILITY = env("FACILITY", "RANGE_HOSPITAL")
@@ -187,7 +198,7 @@ def run_sender() -> None:
 
     app = env("APP", "MODALITY")
     peer_app = env("PEER_APP", "EMR")
-    interval = env_int("INTERVAL", 5)
+    interval = env_float("INTERVAL", 5)
     log(f"sending to {target}:{PORT} every {interval}s (app={app} -> {peer_app})")
 
     counter = 0

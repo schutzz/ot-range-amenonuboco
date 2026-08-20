@@ -42,6 +42,17 @@ def env_int(name: str, default: int) -> int:
         return default
 
 
+def env_float(name: str, default: float) -> float:
+    # env_int()はint()でパースするため"0.05"のような小数秒はValueErrorで
+    # 黙ってdefaultにフォールバックしてしまう（Phase12罠、負荷試験で
+    # INTERVAL=0.05を指定しても無視され既定の5秒間隔で動いていた）。
+    # 秒単位の間隔（INTERVAL等）は必ずこちらを使う。
+    try:
+        return float(env(name) or default)
+    except ValueError:
+        return default
+
+
 LABEL = env("LABEL", "bacnet")
 PORT = env_int("PORT", 47808)
 DEVICE_ID = env_int("DEVICE_ID", 1)
@@ -178,7 +189,7 @@ def run_client() -> None:
         log("TARGET が未設定です（MODE=client では送信先IPが必須）")
         sys.exit(1)
 
-    interval = env_int("INTERVAL", 5)
+    interval = env_float("INTERVAL", 5)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     sock.bind(("0.0.0.0", PORT))

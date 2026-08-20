@@ -69,6 +69,17 @@ def env_int(name: str, default: int) -> int:
         return default
 
 
+def env_float(name: str, default: float) -> float:
+    # env_int()はint()でパースするため"0.05"のような小数秒はValueErrorで
+    # 黙ってdefaultにフォールバックしてしまう（Phase12罠、負荷試験で
+    # INTERVAL=0.05を指定しても無視され既定の5秒間隔で動いていた）。
+    # 秒単位の間隔（INTERVAL等）は必ずこちらを使う。
+    try:
+        return float(env(name) or default)
+    except ValueError:
+        return default
+
+
 LABEL = env("LABEL", "enip")
 PORT = env_int("PORT", 44818)
 CONTEXT = env("CONTEXT", "").encode("utf-8")[:8].ljust(8, b"\x00")
@@ -258,7 +269,7 @@ def run_scanner() -> None:
         log("TARGET が未設定です（MODE=scanner では接続先IPが必須）")
         sys.exit(1)
 
-    interval = env_int("INTERVAL", 5)
+    interval = env_float("INTERVAL", 5)
     log(f"polling {target}:{PORT} every {interval}s")
 
     polls = 0

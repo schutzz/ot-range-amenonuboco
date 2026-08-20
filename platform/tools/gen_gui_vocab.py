@@ -71,6 +71,10 @@ _SAMPLE_MANIFESTS: list[tuple[str, str, str]] = [
     ("semiconductor-fab-reference", "半導体ファブ", "器のみ・観測境界あり"),
     ("manufacturing-melsec-reference", "製造業(MELSEC)", "器のみ・観測境界あり"),
     ("automotive-plant-reference", "自動車組立ライン", "器のみ・観測境界あり"),
+    # ベンチマーク専用（Phase12: 高負荷環境でのパフォーマンス測定）。トポロジ+計装+
+    # 構造化の3層のみで攻撃・検知の実演を持たないため、既存の群taxonomy
+    # （実演あり/器のみ/器のみ・観測境界あり、決定事項#119）上は「器のみ」に分類する。
+    ("stress-test-reference", "パフォーマンス計測", "器のみ"),
 ]
 
 
