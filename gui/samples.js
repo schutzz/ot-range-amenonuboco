@@ -5290,5 +5290,235 @@ window.AMENONUBOCO_SAMPLES = [
         ]
       }
     }
+  },
+  {
+    "group": "器のみ・観測境界あり",
+    "id": "automotive-plant-reference",
+    "label": "自動車組立ライン",
+    "model": {
+      "apiVersion": "amenonuboco/v1alpha1",
+      "instrumentation": {
+        "exclude": [],
+        "mirror_to": "mirror_link"
+      },
+      "kind": "CyberRange",
+      "metadata": {
+        "description": "自動車組立ラインを模した構成。グローバル標準の L2 プロトコル（PROFINET, EtherCAT）と、 セキュア拡張された ENIP (CIP Security / TLS) が飛び交う高負荷・高難度環境。 ブロードキャストによるL2直結通信と、TLS暗号化通信の観測パリティを実証する。\n",
+        "name": "automotive-plant-reference"
+      },
+      "structuring": {
+        "elasticsearch_url": "http://elasticsearch:9200",
+        "engine": "tshark",
+        "protocols": [
+          {
+            "name": "ecat",
+            "output_index": "ot-logs-ecat-*"
+          },
+          {
+            "name": "pn_rt",
+            "output_index": "ot-logs-pn_rt-*"
+          },
+          {
+            "name": "enip",
+            "output_index": "ot-logs-enip-*"
+          }
+        ]
+      },
+      "topology": {
+        "assets": [
+          {
+            "image": "debian:bullseye-slim",
+            "name": "wan_router",
+            "networks": [
+              {
+                "ip": "10.1.10.254",
+                "segment": "cc_lan"
+              },
+              {
+                "ip": "10.1.20.254",
+                "segment": "cell_a_lan"
+              },
+              {
+                "ip": "10.1.30.254",
+                "segment": "cell_b_lan"
+              },
+              {
+                "ip": "192.168.100.254",
+                "segment": "mirror_link"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": null,
+              "environment": [],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "l3-router"
+          },
+          {
+            "image": "../protocol-images/enip",
+            "name": "historian",
+            "networks": [
+              {
+                "ip": "10.1.10.15",
+                "segment": "cc_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=scanner",
+                "TARGET=10.1.30.11",
+                "TLS_ENABLE=true",
+                "SSLKEYLOGFILE=/tmp/keys/client.log"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/ethercat",
+            "name": "cell_a_robot_master",
+            "networks": [
+              {
+                "ip": "10.1.20.10",
+                "segment": "cell_a_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": [
+                "NET_ADMIN",
+                "NET_RAW"
+              ],
+              "command": "python3 -u /app/run.py",
+              "environment": [
+                "MODE=master"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/ethercat",
+            "name": "cell_a_robot_slave",
+            "networks": [
+              {
+                "ip": "10.1.20.11",
+                "segment": "cell_a_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": [
+                "NET_ADMIN",
+                "NET_RAW"
+              ],
+              "command": "python3 -u /app/run.py",
+              "environment": [
+                "MODE=slave"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/enip",
+            "name": "cell_b_plc",
+            "networks": [
+              {
+                "ip": "10.1.30.11",
+                "segment": "cell_b_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": "python3 /app/run.py",
+              "environment": [
+                "MODE=adapter",
+                "TLS_ENABLE=true",
+                "SSLKEYLOGFILE=/tmp/keys/server.log"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "../protocol-images/profinet",
+            "name": "cell_b_io",
+            "networks": [
+              {
+                "ip": "10.1.30.12",
+                "segment": "cell_b_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": [
+                "NET_ADMIN",
+                "NET_RAW"
+              ],
+              "command": "python3 -u /app/run.py",
+              "environment": [
+                "MODE=client"
+              ],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "ot-asset"
+          },
+          {
+            "image": "debian:bullseye-slim",
+            "name": "log_structurer",
+            "networks": [
+              {
+                "ip": "192.168.100.60",
+                "segment": "mirror_link"
+              },
+              {
+                "ip": "10.1.10.60",
+                "segment": "cc_lan"
+              }
+            ],
+            "overrides": {
+              "cap_add": null,
+              "command": null,
+              "environment": [],
+              "ports": [],
+              "sysctls": null
+            },
+            "role": "structurer"
+          }
+        ],
+        "routing": {
+          "gateway": "wan_router"
+        },
+        "segments": [
+          {
+            "cidr": "10.1.10.0/24",
+            "kind": "it-core",
+            "name": "cc_lan"
+          },
+          {
+            "cidr": "10.1.20.0/24",
+            "kind": "ot-l2",
+            "name": "cell_a_lan"
+          },
+          {
+            "cidr": "10.1.30.0/24",
+            "kind": "ot-lan",
+            "name": "cell_b_lan"
+          },
+          {
+            "cidr": "192.168.100.0/24",
+            "kind": "observation",
+            "name": "mirror_link"
+          }
+        ]
+      }
+    }
   }
 ];

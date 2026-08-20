@@ -70,6 +70,7 @@ _SAMPLE_MANIFESTS: list[tuple[str, str, str]] = [
     ("financial-datacenter-reference", "金融", "器のみ・観測境界あり"),
     ("semiconductor-fab-reference", "半導体ファブ", "器のみ・観測境界あり"),
     ("manufacturing-melsec-reference", "製造業(MELSEC)", "器のみ・観測境界あり"),
+    ("automotive-plant-reference", "自動車組立ライン", "器のみ・観測境界あり"),
 ]
 
 

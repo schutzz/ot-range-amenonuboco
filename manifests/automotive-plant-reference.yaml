@@ -1,0 +1,107 @@
+apiVersion: amenonuboco/v1alpha1
+kind: CyberRange
+metadata:
+  name: automotive-plant-reference
+  description: >
+    自動車組立ラインを模した構成。グローバル標準の L2 プロトコル（PROFINET, EtherCAT）と、
+    セキュア拡張された ENIP (CIP Security / TLS) が飛び交う高負荷・高難度環境。
+    ブロードキャストによるL2直結通信と、TLS暗号化通信の観測パリティを実証する。
+
+topology:
+  routing:
+    gateway: wan_router
+  segments:
+    - { name: cc_lan,       cidr: 10.1.10.0/24, kind: it-core }
+    - { name: cell_a_lan,   cidr: 10.1.20.0/24, kind: ot-l2 }
+    - { name: cell_b_lan,   cidr: 10.1.30.0/24, kind: ot-lan }
+    - { name: mirror_link,  cidr: 192.168.100.0/24, kind: observation }
+
+  assets:
+    - name: wan_router
+      role: l3-router
+      image: debian:bullseye-slim
+      networks:
+        - { segment: cc_lan,       ip: 10.1.10.254 }
+        - { segment: cell_a_lan,   ip: 10.1.20.254 }
+        - { segment: cell_b_lan,   ip: 10.1.30.254 }
+        - { segment: mirror_link,  ip: 192.168.100.254 }
+
+    - name: historian
+      role: ot-asset
+      image: ../protocol-images/enip
+      networks:
+        - { segment: cc_lan, ip: 10.1.10.15 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=scanner"
+          - "TARGET=10.1.30.11"
+          - "TLS_ENABLE=true"
+          - "SSLKEYLOGFILE=/tmp/keys/client.log"
+        
+    - name: cell_a_robot_master
+      role: ot-asset
+      image: ../protocol-images/ethercat
+      networks:
+        - { segment: cell_a_lan, ip: 10.1.20.10 }
+      overrides:
+        command: "python3 -u /app/run.py"
+        cap_add: [ "NET_ADMIN", "NET_RAW" ]
+        environment:
+          - "MODE=master"
+
+    - name: cell_a_robot_slave
+      role: ot-asset
+      image: ../protocol-images/ethercat
+      networks:
+        - { segment: cell_a_lan, ip: 10.1.20.11 }
+      overrides:
+        command: "python3 -u /app/run.py"
+        cap_add: [ "NET_ADMIN", "NET_RAW" ]
+        environment:
+          - "MODE=slave"
+
+    - name: cell_b_plc
+      role: ot-asset
+      image: ../protocol-images/enip
+      networks:
+        - { segment: cell_b_lan, ip: 10.1.30.11 }
+      overrides:
+        command: "python3 /app/run.py"
+        environment:
+          - "MODE=adapter"
+          - "TLS_ENABLE=true"
+          - "SSLKEYLOGFILE=/tmp/keys/server.log"
+
+    - name: cell_b_io
+      role: ot-asset
+      image: ../protocol-images/profinet
+      networks:
+        - { segment: cell_b_lan, ip: 10.1.30.12 }
+      overrides:
+        command: "python3 -u /app/run.py"
+        cap_add: [ "NET_ADMIN", "NET_RAW" ]
+        environment:
+          - "MODE=client"
+
+    - name: log_structurer
+      role: structurer
+      image: debian:bullseye-slim
+      networks:
+        - { segment: mirror_link, ip: 192.168.100.60 }
+        - { segment: cc_lan,      ip: 10.1.10.60 }
+
+instrumentation:
+  mirror_to: mirror_link
+  exclude: []
+
+structuring:
+  engine: tshark
+  protocols:
+    - { name: ecat, output_index: ot-logs-ecat-* }
+    - { name: pn_rt, output_index: ot-logs-pn_rt-* }
+    - { name: enip, output_index: ot-logs-enip-* }
+  decryption:
+    key_log_volume: "key-volume"
+    target_protocols:
+      - enip

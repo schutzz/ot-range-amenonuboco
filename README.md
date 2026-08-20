@@ -1,11 +1,11 @@
 # Amenonuboco — Cyber Range as Code
 
-![status](https://img.shields.io/badge/status-Phase%2011%20Stage1%20(Smart%20Factory%20Protocols)-brightgreen)
+![status](https://img.shields.io/badge/status-Phase%2011%20(Smart%20Factory%20Protocols)-brightgreen)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 [![CI](https://github.com/schutzz/ot-range-amenonuboco/actions/workflows/ci.yml/badge.svg)](https://github.com/schutzz/ot-range-amenonuboco/actions/workflows/ci.yml)
 [![Deploy GUI to Pages](https://github.com/schutzz/ot-range-amenonuboco/actions/workflows/pages.yml/badge.svg)](https://github.com/schutzz/ot-range-amenonuboco/actions/workflows/pages.yml)
 [![Live GUI Demo](https://img.shields.io/badge/GUI-Live%20Demo-blue)](https://schutzz.github.io/ot-range-amenonuboco/)
-![tests](https://img.shields.io/badge/tests-458%20(436%20pass%20%2F%2022%20skip)-brightgreen)
+![tests](https://img.shields.io/badge/tests-478%20(454%20pass%20%2F%2024%20skip)-brightgreen)
 ![python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
 [![last commit](https://img.shields.io/github/last-commit/schutzz/ot-range-amenonuboco)](https://github.com/schutzz/ot-range-amenonuboco/commits/main)
 
@@ -180,17 +180,15 @@ python cli.py diagram   ../manifests/manufacturing-plant-reference.yaml
 
 ## ステータス
 
-**Phase 11 Stage 1（スマートファクトリー特化プロトコル拡張 ＆ 演習用暗号鍵注入アーキテクチャ）が完了しました。** Phase 10（Digital Twin ＆ Impairment）の上に、以下の実用プロトコル資産と演習用復号パイプラインを統合しました。
+**Phase 11（スマートファクトリー特化プロトコル拡張 ＆ 演習用暗号鍵注入アーキテクチャ）が Stage 1・2 とも完了しました。** Phase 10（Digital Twin ＆ Impairment）の上に、以下の実用プロトコル資産と演習用復号パイプラインを統合しました。
 
-- **国内主力・半導体プロトコルの実コンテナ化**：三菱MELSEC（MCプロトコル/3E フレーム）、オムロンFINS、SECS/GEM（HSMS-SS）、MQTT(S) の4資産を `protocol-images/` に追加。既存9資産と同じ「サーバ／クライアントを実際に立て、tsharkがフィールドを抽出するところまで実機確認済み」規約に準拠。
-- **演習用暗号鍵注入アーキテクチャ（Dual-View Observation）**：`structuring.decryption`（TLS復号鍵ログ）・`structuring.dissector_plugins`（Lua dissector配線）をスキーマへ後方互換で追加し、`mqtt`/`secsgem` の TLS 通信を tshark 側で透過復号できるようにした（決定事項#155〜#165）。
+- **国内主力・半導体・グローバル標準プロトコルの実コンテナ化**：三菱MELSEC（MCプロトコル/3E フレーム）、オムロンFINS、SECS/GEM（HSMS-SS）、MQTT(S)、PROFINET RT、EtherCAT（いずれも L2 Raw Socket）の6資産を `protocol-images/` に追加。既存資産と同じ「サーバ／クライアントを実際に立て、tsharkがフィールドを抽出するところまで実機確認済み」規約に準拠。
+- **演習用暗号鍵注入アーキテクチャ（Dual-View Observation）**：`structuring.decryption`（TLS復号鍵ログ）・`structuring.dissector_plugins`（Lua dissector配線）をスキーマへ後方互換で追加し、`mqtt`/`secsgem`/`enip`（CIP Security拡張）の TLS 通信を tshark 側で透過復号できるようにした（決定事項#155〜#169）。サーバ・クライアント双方の鍵ログファイルに実際のTLS 1.3セッション鍵が書き出され、両側で一致することを実機確認済み。
 - **Luaプラグイン配線機構**：tshark にネイティブ dissector が無い MELSEC 向けに、Lua dissector をホストパス指定で `structurer` コンテナへ自動マウントする機構を実装。
-- **配線テストの拡充**：罠#036（宣言のみの器）の教訓を継承し、新規4資産・TLS復号・Lua配線について、マニフェスト入力からCompose出力までを通しで検証する配線テストを追加。
-- **実機検証で6件のバグを発見・修正**：`pytest` 全件PASSの状態から、さらに `docker build`／`docker run`／実プロトコル交換まで確認したところ、フレーミングバグ等の実装不具合6件（罠#037〜#042）を発見し修正した。「テストが緑＝実装が正しい」わけではないという教訓を実演した形。
+- **配線テストの拡充**：罠#036（宣言のみの器）の教訓を継承し、新規資産・TLS復号・Lua配線について、マニフェスト入力からCompose出力までを通しで検証する配線テストを追加。
+- **実機検証で13件のバグを発見・修正**：`pytest` 全件PASSの状態から、さらに `docker build`／`docker run`／実プロトコル交換まで確認したところ、フレーミングバグ・L2ペイロードの文字化け・TLS鍵ログの未出力等、実機でしか発見できない不具合13件（罠#037〜#049）を発見し修正した。「テストが緑＝実装が正しい」わけではないという教訓を実演した形。
 
-累計テスト件数は **458 件**（436 PASS / 22 SKIP、いずれも正常系）です。スキーマ・生成物・GUI（Python/JSのパリティを含む）・シナリオ資産をカバーする pytest スイートと GitHub Actions CI を継続して整備しています。
-
-Stage 2（PROFINET・EtherCAT・CIP Security拡張）は次フェーズへ先送りしています。
+累計テスト件数は **478 件**（454 PASS / 24 SKIP、いずれも正常系）です。スキーマ・生成物・GUI（Python/JSのパリティを含む）・シナリオ資産をカバーする pytest スイートと GitHub Actions CI を継続して整備しています。
 
 ### 開発
 

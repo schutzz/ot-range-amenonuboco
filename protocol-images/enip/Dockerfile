@@ -11,7 +11,7 @@ FROM python:3.10-slim
 # ゲートウェイを迂回し、ゲートウェイ上のミラーリングに乗らない＝観測
 # されない)。同梱しておくと起動時のapt-getを丸ごと省略でき、レンジの
 # 立ち上がりが速くなり、パッケージ配信への依存も無くなる。
-RUN DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iproute2 >/dev/null 2>&1 && rm -rf /var/lib/apt/lists/*
+RUN DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iproute2 openssl >/dev/null 2>&1 && rm -rf /var/lib/apt/lists/*
 
 COPY run.py /app/run.py
 

@@ -95,6 +95,12 @@ def _generate_self_signed_cert() -> tuple[str, str, str]:
          "-CAcreateserial", "-out", srv_cert],
         check=True, capture_output=True,
     )
+    # openssl は鍵ファイルを 0600（所有者=root のみ読み取り可）で生成するが、
+    # Debian パッケージ版 mosquitto は root で起動しても内部的に mosquitto
+    # ユーザーへ実行権限を落としてから listener 設定(keyfile)を読みに行くため、
+    # 0600 のままだと "Permission denied" でブローカーが即終了する。演習用の
+    # 使い捨て自己署名鍵であり秘匿性は問題にならないため、世界読み取り可にする。
+    os.chmod(srv_key, 0o644)
     return ca_cert, srv_cert, srv_key
 
 
@@ -163,25 +169,19 @@ def run_client() -> None:
 
     if TLS_ENABLE:
         import ssl
+        # ssl.create_default_context() は SSLKEYLOGFILE 環境変数が設定されて
+        # いると内部で自動的に keylog_filename へ反映しようとする。このとき
+        # 出力先ディレクトリが無いと FileNotFoundError で即クラッシュするため、
+        # create_default_context() を呼ぶ**前**にディレクトリを用意しておく
+        # 必要がある（演習用暗号鍵注入アーキテクチャ、Phase11 決定事項#160）。
+        if SSLKEYLOGFILE:
+            os.makedirs(os.path.dirname(SSLKEYLOGFILE), exist_ok=True)
+
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
         if SSLKEYLOGFILE:
-            # Python 3.8+ で SSLKEYLOGFILE 相当を実装する
-            # TLS セッションキーを書き出す（演習用鍵注入アーキテクチャ）
-            orig_do_handshake = ctx.wrap_socket
-
-            def _patched_wrap(*args, **kwargs):
-                sock = orig_do_handshake(*args, **kwargs)
-                try:
-                    # Python 3.10+ では get_sslkeylogfile() 相当の API は無いため、
-                    # SSLKEYLOGFILE 環境変数を Python プロセスレベルで設定することで
-                    # OpenSSL 側に透過させる（Linux の LD_PRELOAD 不要）。
-                    os.environ["SSLKEYLOGFILE"] = SSLKEYLOGFILE
-                except Exception:
-                    pass
-                return sock
-            ctx.wrap_socket = _patched_wrap  # type: ignore[method-assign]
+            ctx.keylog_filename = SSLKEYLOGFILE
 
         client.tls_set_context(ctx)
 

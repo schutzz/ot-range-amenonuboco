@@ -97,6 +97,8 @@ image: ../protocol-images/modbus
 | `mqtt` | MQTT(S) | `mqtt` | 1883/tcp (TLS:8883) | — |
 | `secsgem` | SECS/GEM (HSMS-SS) | `hsms` | 5000/tcp | — |
 | `melsec` | 三菱 MCプロトコル(3E) | `tcp.port == 5007` | 5007/tcp | — (※1) |
+| `profinet` | PROFINET RT | `pn_rt` | (L2 Raw) | — |
+| `ethercat` | EtherCAT | `ecat` | (L2 Raw) | — |
 
 *(※1) MELSECはtsharkネイティブディセクタがないため、`tcp.port` フィルタで捕捉後、Luaプラグインをマウントして解析する運用（詳細は後述）。*
 
@@ -189,12 +191,23 @@ UACは REGISTER → INVITE → ACK → BYE という1本の呼を周期的に流
 ### `enip`
 
 `MODE`: `adapter` / `scanner`。`PRODUCT`（アダプタが名乗る製品名）、`CONTEXT`（送信者コンテキスト、8バイトまで）。
+また `TLS_ENABLE=true` を指定することで、CIP Security 相当の TLS/DTLS 暗号化ラッパーを有効化できます。`SSLKEYLOGFILE` をマウントして鍵をダンプすることで、TLS暗号化された制御通信の復号・観測パリティの検証が可能です。
 
 スキャナは RegisterSession の後、Get_Attribute_All（Identity）・Get_Attribute_Single（Assembly）・Set_Attribute_Single を巡回します。
 
 `CONTEXT` はEtherNet/IPヘッダの8バイト任意領域にそのまま載ります。要求と応答を対応づけるための欄で**中身は検査されない**ため、攻撃シナリオで目印を仕込む場所として使えます。
 
 **実測で取れるもの**: `enip.command`、`enip.session`、`enip.context`。加えて**CIP層が独立したレイヤ `cip` として現れます**——`cip.service` が 0x01 / 0x0E / 0x10（応答は最上位ビットが立って 0x81 / 0x8E / 0x90）、Identity応答から `cip.id.vendor_id`・`cip.id.product_name`・`cip.id.serial_number`。
+
+### `profinet`
+
+`MODE`: `client` / `server`。L2 Raw Socket (EtherType `0x8892`) を使用して PROFINET RT Cyclic Data フレームをブロードキャストします。
+※ L2 通信のため、マニフェスト内で `cap_add: [ "NET_ADMIN", "NET_RAW" ]` が必要です。
+
+### `ethercat`
+
+`MODE`: `master` / `slave`。L2 Raw Socket (EtherType `0x88A4`) を使用して EtherCAT データグラムをブロードキャストします。
+※ L2 通信のため、マニフェスト内で `cap_add: [ "NET_ADMIN", "NET_RAW" ]` が必要です。
 
 ### `fins`
 

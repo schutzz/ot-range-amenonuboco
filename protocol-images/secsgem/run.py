@@ -210,7 +210,10 @@ def _make_ssl_context_server() -> ssl.SSLContext | None:
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(cert, key)
     if SSLKEYLOGFILE:
-        os.environ["SSLKEYLOGFILE"] = SSLKEYLOGFILE
+        # Python の ssl モジュールは SSLKEYLOGFILE 環境変数を自動では読まない。
+        # keylog_filename を明示的に設定しないと鍵ログは一切書き出されない。
+        os.makedirs(os.path.dirname(SSLKEYLOGFILE), exist_ok=True)
+        ctx.keylog_filename = SSLKEYLOGFILE
     return ctx
 
 
@@ -221,7 +224,8 @@ def _make_ssl_context_client() -> ssl.SSLContext | None:
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     if SSLKEYLOGFILE:
-        os.environ["SSLKEYLOGFILE"] = SSLKEYLOGFILE
+        os.makedirs(os.path.dirname(SSLKEYLOGFILE), exist_ok=True)
+        ctx.keylog_filename = SSLKEYLOGFILE
     return ctx
 
 

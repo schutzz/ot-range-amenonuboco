@@ -34,6 +34,8 @@ import socket
 import struct
 import sys
 import time
+import ssl
+import subprocess
 
 # --- カプセル化ヘッダ（24バイト固定） ----------------------------------------
 #   command(2,LE) | length(2,LE) | session handle(4,LE) | status(4,LE)
@@ -70,6 +72,33 @@ def env_int(name: str, default: int) -> int:
 LABEL = env("LABEL", "enip")
 PORT = env_int("PORT", 44818)
 CONTEXT = env("CONTEXT", "").encode("utf-8")[:8].ljust(8, b"\x00")
+TLS_ENABLE = env("TLS_ENABLE", "false").lower() == "true"
+SSLKEYLOGFILE = env("SSLKEYLOGFILE", "")
+if SSLKEYLOGFILE:
+    os.makedirs(os.path.dirname(SSLKEYLOGFILE), exist_ok=True)
+
+def get_ssl_context(is_server: bool) -> ssl.SSLContext:
+    if is_server:
+        ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        if not os.path.exists("server.crt"):
+            subprocess.run([
+                "openssl", "req", "-x509", "-newkey", "rsa:2048", "-keyout", "server.key",
+                "-out", "server.crt", "-days", "365", "-nodes", "-subj", "/CN=enip"
+            ], check=True, capture_output=True)
+        ctx.load_cert_chain(certfile="server.crt", keyfile="server.key")
+    else:
+        ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
+    if SSLKEYLOGFILE:
+        # Python の ssl モジュールは SSLKEYLOGFILE 環境変数を自動では読まない
+        # （curl/OpenSSL CLI やブラウザとは異なる）。ハンドシェイク前に
+        # SSLContext.keylog_filename を明示的に設定しないと鍵ログは一切
+        # 書き出されない（演習用暗号鍵注入アーキテクチャ、決定事項#160）。
+        ctx.keylog_filename = SSLKEYLOGFILE
+
+    return ctx
 
 
 def log(message: str) -> None:
@@ -163,7 +192,13 @@ def run_adapter() -> None:
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     listener.bind(("0.0.0.0", PORT))
     listener.listen(5)
-    log(f"EtherNet/IP adapter listening on 0.0.0.0:{PORT} ('{product}')")
+    
+    if TLS_ENABLE:
+        ctx = get_ssl_context(is_server=True)
+        listener = ctx.wrap_socket(listener, server_side=True)
+        log(f"EtherNet/IP (CIP Security TLS) adapter listening on 0.0.0.0:{PORT} ('{product}')")
+    else:
+        log(f"EtherNet/IP adapter listening on 0.0.0.0:{PORT} ('{product}')")
 
     while True:
         conn, addr = listener.accept()
@@ -230,6 +265,9 @@ def run_scanner() -> None:
     while True:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(10)
+        if TLS_ENABLE:
+            ctx = get_ssl_context(is_server=False)
+            sock = ctx.wrap_socket(sock, server_hostname=target)
         try:
             sock.connect((target, PORT))
         except OSError as exc:
