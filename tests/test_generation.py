@@ -131,4 +131,4 @@ def test_stress_manifest_uses_tcpreplay_for_scenario_c(presets, repo_root):
     assets = {asset.name: asset for asset in manifest.topology.assets}
     replay = assets["sc_c_tcpreplay"]
     assert replay.image == "../protocol-images/tcpreplay"
-    assert "TCREPLAY_PPS=5000" in replay.overrides.environment
+    assert "TCREPLAY_PPS=${TCREPLAY_PPS:-5000}" in replay.overrides.environment

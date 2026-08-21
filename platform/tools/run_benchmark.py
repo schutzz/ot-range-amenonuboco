@@ -121,13 +121,42 @@ def wait_for_es(timeout_s: int = 60) -> bool:
     return False
 
 
+def wait_for_structurer_capture(timeout_s: int = 60) -> bool:
+    """完全再構築後、tsharkが実際にcapture開始するまで待つ。"""
+    name = container_name("log_structurer")
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        logs = subprocess.run(["docker", "logs", name], capture_output=True, text=True, errors="replace")
+        if "Capturing on" in logs.stdout + logs.stderr:
+            print("log_structurer capture is ready.")
+            return True
+        time.sleep(1)
+    print("log_structurer did not report capture readiness.")
+    return False
+
+
+def qdisc_stats() -> str:
+    """Tier4で比較するrouterのtc統計スナップショット。"""
+    proc = subprocess.run(
+        ["docker", "exec", container_name("wan_router"), "tc", "-s", "qdisc", "show"],
+        capture_output=True, text=True, errors="replace",
+    )
+    return proc.stdout + proc.stderr
+
+
 def compose(
-    *args: str, project: str = "amenonuboco-bench", batch_size: int | None = None
+    *args: str, project: str = "amenonuboco-bench", batch_size: int | None = None,
+    tcpreplay_pps: int | None = None,
 ) -> subprocess.CompletedProcess:
     cmd = ["docker", "compose", "-f", str(COMPOSE_FILE), "-p", project, *args]
     env = None
+    overrides = {}
     if batch_size is not None:
-        env = os.environ | {"BULK_LOADER_BATCH_SIZE": str(batch_size)}
+        overrides["BULK_LOADER_BATCH_SIZE"] = str(batch_size)
+    if tcpreplay_pps is not None:
+        overrides["TCREPLAY_PPS"] = str(tcpreplay_pps)
+    if overrides:
+        env = os.environ | overrides
     return sh(cmd, env=env)
 
 
@@ -237,6 +266,7 @@ def run_scenario(
     settle_timeout: float,
     settle_poll_interval: float,
     settle_stable_polls: int,
+    tcpreplay_pps: int | None,
 ) -> dict:
     cfg = SCENARIOS[scenario]
     clients = cfg["clients"]
@@ -250,8 +280,11 @@ def run_scenario(
 
     if not wait_for_es():
         return {"scenario": scenario, "error": "elasticsearch not ready"}
+    if scenario == "C" and not wait_for_structurer_capture():
+        return {"scenario": scenario, "error": "log_structurer capture not ready"}
 
     initial_count = get_es_count(cfg["index"])
+    qdisc_before = qdisc_stats() if scenario == "C" else None
     print(f"Initial doc count: {initial_count}")
 
     # `--since`用の基準時刻。compose up直前に取得する（コンテナが使い回され
@@ -259,7 +292,7 @@ def run_scenario(
     # 数えれば「今回の実行分」を正しく切り出せる）。
     run_start_ts = int(time.time())
 
-    compose("up", "-d", *servers, *clients, batch_size=batch_size)
+    compose("up", "-d", *servers, *clients, batch_size=batch_size, tcpreplay_pps=tcpreplay_pps)
 
     print(f"Running for {duration} seconds...")
     time.sleep(duration)
@@ -268,7 +301,7 @@ def run_scenario(
         # tcpreplayは終了時に初めてActual統計を出力する。`compose stop`は
         # 既定の猶予時間中も再生が続くため、測定窓の直後にSIGINTを送る。
         # tcpreplayはSIGINTで統計を出して終了する。
-        compose("kill", "-s", "SIGINT", *clients, batch_size=batch_size)
+        compose("kill", "-s", "SIGINT", *clients, batch_size=batch_size, tcpreplay_pps=tcpreplay_pps)
         sent = sum(count_tcpreplay_packets(c, since=run_start_ts) for c in clients)
         print(f"  tcpreplay: {sent} packets reported at SIGINT shutdown")
     else:
@@ -279,12 +312,13 @@ def run_scenario(
             n = count_client_log_lines(c, pattern, since=run_start_ts)
             print(f"  {c}: {n} lines matching '{pattern}'")
             sent += n
-        compose("stop", *clients, *servers, batch_size=batch_size)
+        compose("stop", *clients, *servers, batch_size=batch_size, tcpreplay_pps=tcpreplay_pps)
 
     final_count, settled = wait_for_count_stable(
         cfg["index"], settle_timeout, settle_poll_interval, settle_stable_polls
     )
     received = final_count - initial_count
+    qdisc_after = qdisc_stats() if scenario == "C" else None
     throughput = received / duration
     loss_pct = max(0.0, (sent - received) / sent * 100) if sent > 0 else None
 
@@ -299,6 +333,9 @@ def run_scenario(
         "batch_size": batch_size,
         "es_count_settled": settled,
     }
+    if scenario == "C":
+        result["qdisc_before"] = qdisc_before
+        result["qdisc_after"] = qdisc_after
     print(f"--- Result: {json.dumps(result, ensure_ascii=False)} ---")
     return result
 
@@ -317,13 +354,18 @@ def main() -> None:
         help="計測前にベース基盤（router/elasticsearch/structurer）を起動する。",
     )
     parser.add_argument("--batch-size", type=int, default=50, help="bulk_loaderのES投入バッチ件数")
-    parser.add_argument("--settle-timeout", type=float, default=60.0)
+    parser.add_argument("--settle-timeout", type=float, default=None)
     parser.add_argument("--settle-poll-interval", type=float, default=2.0)
     parser.add_argument("--settle-stable-polls", type=int, default=3)
+    parser.add_argument("--tcpreplay-pps", type=int, default=None)
     args = parser.parse_args()
 
     if args.batch_size < 1:
         parser.error("--batch-size must be >= 1")
+    if args.tcpreplay_pps is not None and args.tcpreplay_pps < 1:
+        parser.error("--tcpreplay-pps must be >= 1")
+    if args.scenario != "C" and args.tcpreplay_pps is not None:
+        parser.error("--tcpreplay-pps is only valid with --scenario C")
 
     if not COMPOSE_FILE.exists() or args.setup:
         regenerate_compose()
@@ -336,9 +378,11 @@ def main() -> None:
         if not wait_for_es():
             sys.exit(1)
 
+    settle_timeout = args.settle_timeout if args.settle_timeout is not None else (300.0 if args.scenario == "C" else 60.0)
     result = run_scenario(
         args.scenario, args.duration, args.interval, args.batch_size,
-        args.settle_timeout, args.settle_poll_interval, args.settle_stable_polls,
+        settle_timeout, args.settle_poll_interval, args.settle_stable_polls,
+        args.tcpreplay_pps,
     )
     print(json.dumps(result, ensure_ascii=False))
 

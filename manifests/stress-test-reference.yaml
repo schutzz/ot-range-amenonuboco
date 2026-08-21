@@ -122,7 +122,7 @@ topology:
       overrides:
         cap_add: [ "NET_ADMIN", "NET_RAW" ]
         environment:
-          - "TCREPLAY_PPS=5000"
+          - "TCREPLAY_PPS=${TCREPLAY_PPS:-5000}"
           - "TCREPLAY_LOOP=0"
 
 instrumentation:
