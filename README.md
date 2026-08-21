@@ -1,6 +1,6 @@
 # Amenonuboco — Cyber Range as Code
 
-![status](https://img.shields.io/badge/status-Phase%2011%20(Smart%20Factory%20Protocols)-brightgreen)
+![status](https://img.shields.io/badge/status-Phase%2012%20(Performance%20Evidence)-brightgreen)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22051216.svg)](https://doi.org/10.5281/zenodo.22051216)
 [![CI](https://github.com/schutzz/ot-range-amenonuboco/actions/workflows/ci.yml/badge.svg)](https://github.com/schutzz/ot-range-amenonuboco/actions/workflows/ci.yml)
@@ -181,7 +181,9 @@ python cli.py diagram   ../manifests/manufacturing-plant-reference.yaml
 
 ## ステータス
 
-**Phase 11（スマートファクトリー特化プロトコル拡張 ＆ 演習用暗号鍵注入アーキテクチャ）が Stage 1・2 とも完了しました。** Phase 10（Digital Twin ＆ Impairment）の上に、以下の実用プロトコル資産と演習用復号パイプラインを統合しました。
+**Phase 12（高負荷環境でのパフォーマンス測定と限界定義）を進行中です。** Phase 11（スマートファクトリー特化プロトコル拡張 ＆ 演習用暗号鍵注入アーキテクチャ）はStage 1・2とも完了し、Phase 12では実測証跡・SLO・再現手順を整備しています。
+
+**性能Q&Aの回答根拠**：Docker Desktop参照環境で、PROFINET RTを`tcpreplay`で50,000 pps・10秒注入し、300秒以内のES定常化で最終到達率99.98%以上、router qdiscドロップ0を確認しました。60秒以内の未定常は即時のデータ損失ではなく後段滞留として扱います。詳細・生データは[`docs/performance/phase12/`](./docs/performance/phase12/)を参照してください。CPU4の資源緩和は有望ですが、改善係数は外部主張に用いません。
 
 - **国内主力・半導体・グローバル標準プロトコルの実コンテナ化**：三菱MELSEC（MCプロトコル/3E フレーム）、オムロンFINS、SECS/GEM（HSMS-SS）、MQTT(S)、PROFINET RT、EtherCAT（いずれも L2 Raw Socket）の6資産を `protocol-images/` に追加。既存資産と同じ「サーバ／クライアントを実際に立て、tsharkがフィールドを抽出するところまで実機確認済み」規約に準拠。
 - **演習用暗号鍵注入アーキテクチャ（Dual-View Observation）**：`structuring.decryption`（TLS復号鍵ログ）・`structuring.dissector_plugins`（Lua dissector配線）をスキーマへ後方互換で追加し、`mqtt`/`secsgem`/`enip`（CIP Security拡張）の TLS 通信を tshark 側で透過復号できるようにした（決定事項#155〜#169）。サーバ・クライアント双方の鍵ログファイルに実際のTLS 1.3セッション鍵が書き出され、両側で一致することを実機確認済み。
@@ -206,4 +208,4 @@ pytest          # スキーマ検証・生成物・記法ガイド整合・シ�
 
 ---
 
-🤖 このプロジェクトは [Claude Code](https://claude.com/claude-code) と [Gemini](https://gemini.google.com) を用いて開発されています。
+🤖 このプロジェクトは [Claude Code](https://claude.com/claude-code) と [Codex](https://openai.com/codex/) を用いて開発されています。
