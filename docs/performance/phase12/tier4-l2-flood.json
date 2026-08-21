@@ -1,0 +1,11 @@
+{
+  "scenario": "C", "environment": "Docker Desktop", "duration_s": 10, "settle_timeout_s": 300,
+  "results": [
+    {"pps":25000,"sent":248430,"received":248400,"loss_pct":0.01,"settled":true,"qdisc_drops":0},
+    {"pps":25000,"sent":250141,"received":250100,"loss_pct":0.02,"settled":true,"qdisc_drops":0},
+    {"pps":25000,"sent":261780,"received":261700,"loss_pct":0.03,"settled":true,"qdisc_drops":0},
+    {"pps":50000,"sent":498140,"received":498100,"loss_pct":0.01,"settled":true,"qdisc_drops":0},
+    {"pps":50000,"sent":498597,"received":498500,"loss_pct":0.02,"settled":true,"qdisc_drops":0},
+    {"pps":50000,"sent":497973,"received":497900,"loss_pct":0.01,"settled":true,"qdisc_drops":0}
+  ]
+}

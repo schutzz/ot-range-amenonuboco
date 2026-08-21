@@ -5763,8 +5763,8 @@ window.AMENONUBOCO_SAMPLES = [
             "role": "ot-asset"
           },
           {
-            "image": "../protocol-images/profinet",
-            "name": "sc_c_profinet_client1",
+            "image": "../protocol-images/tcpreplay",
+            "name": "sc_c_tcpreplay",
             "networks": [
               {
                 "ip": "10.1.20.13",
@@ -5776,34 +5776,10 @@ window.AMENONUBOCO_SAMPLES = [
                 "NET_ADMIN",
                 "NET_RAW"
               ],
-              "command": "python3 -u /app/run.py",
+              "command": null,
               "environment": [
-                "MODE=client",
-                "INTERVAL=0.001"
-              ],
-              "ports": [],
-              "sysctls": null
-            },
-            "role": "ot-asset"
-          },
-          {
-            "image": "../protocol-images/profinet",
-            "name": "sc_c_profinet_client2",
-            "networks": [
-              {
-                "ip": "10.1.20.14",
-                "segment": "ot_lan"
-              }
-            ],
-            "overrides": {
-              "cap_add": [
-                "NET_ADMIN",
-                "NET_RAW"
-              ],
-              "command": "python3 -u /app/run.py",
-              "environment": [
-                "MODE=client",
-                "INTERVAL=0.001"
+                "TCREPLAY_PPS=${TCREPLAY_PPS:-5000}",
+                "TCREPLAY_LOOP=0"
               ],
               "ports": [],
               "sysctls": null

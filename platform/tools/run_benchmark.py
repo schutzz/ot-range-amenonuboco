@@ -30,7 +30,10 @@ manifests/stress-test-reference.yaml を対象に、シナリオA/B/Cごとに
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
+import os
+import re
 import subprocess
 import sys
 import time
@@ -67,10 +70,11 @@ SCENARIOS = {
         "count_pattern": None,  # クライアントごとにパターンが違うため個別指定（下記参照）
     },
     "C": {
-        "clients": ["sc_c_profinet_client1", "sc_c_profinet_client2"],
+        "clients": ["sc_c_tcpreplay"],
         "servers": [],  # L2ブロードキャストのみ。専用の受信側資産は無い
         "index": "ot-logs-pn_rt-*",
-        "count_pattern": "Sent PROFINET RT Frame",
+        "count_pattern": None,
+        "sent_counter": "tcpreplay",
     },
 }
 
@@ -79,8 +83,6 @@ CLIENT_COUNT_PATTERNS = {
     "sc_a_modbus_client": "wrote",
     "sc_b_opcua_client": "wrote",
     "sc_b_dnp3_client": "response from",
-    "sc_c_profinet_client1": "Sent PROFINET RT Frame",
-    "sc_c_profinet_client2": "Sent PROFINET RT Frame",
 }
 
 
@@ -98,7 +100,7 @@ def get_es_count(index: str) -> int:
             with urllib.request.urlopen(req, timeout=5) as res:
                 data = json.loads(res.read().decode())
                 total += data.get("count", 0)
-        except urllib.error.URLError as e:
+        except (urllib.error.URLError, http.client.HTTPException, OSError) as e:
             print(f"Warning: Failed to reach Elasticsearch ({idx}): {e}")
     return total
 
@@ -119,23 +121,116 @@ def wait_for_es(timeout_s: int = 60) -> bool:
     return False
 
 
-def compose(*args: str, project: str = "amenonuboco-bench") -> subprocess.CompletedProcess:
+def wait_for_structurer_capture(timeout_s: int = 60) -> bool:
+    """完全再構築後、tsharkが実際にcapture開始するまで待つ。"""
+    name = container_name("log_structurer")
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        logs = subprocess.run(["docker", "logs", name], capture_output=True, text=True, errors="replace")
+        if "Capturing on" in logs.stdout + logs.stderr:
+            print("log_structurer capture is ready.")
+            return True
+        time.sleep(1)
+    print("log_structurer did not report capture readiness.")
+    return False
+
+
+def qdisc_stats() -> str:
+    """Tier4で比較するrouterのtc統計スナップショット。"""
+    proc = subprocess.run(
+        ["docker", "exec", container_name("wan_router"), "tc", "-s", "qdisc", "show"],
+        capture_output=True, text=True, errors="replace",
+    )
+    return proc.stdout + proc.stderr
+
+
+def compose(
+    *args: str, project: str = "amenonuboco-bench", batch_size: int | None = None,
+    tcpreplay_pps: int | None = None,
+) -> subprocess.CompletedProcess:
     cmd = ["docker", "compose", "-f", str(COMPOSE_FILE), "-p", project, *args]
-    return sh(cmd)
+    env = None
+    overrides = {}
+    if batch_size is not None:
+        overrides["BULK_LOADER_BATCH_SIZE"] = str(batch_size)
+    if tcpreplay_pps is not None:
+        overrides["TCREPLAY_PPS"] = str(tcpreplay_pps)
+    if overrides:
+        env = os.environ | overrides
+    return sh(cmd, env=env)
+
+
+def wait_for_count_stable(
+    index: str, timeout_s: float, poll_interval_s: float, stable_polls: int
+) -> tuple[int, bool]:
+    """ESの件数が連続して変化しなくなるまで待ち、最終到達数を返す。"""
+    if timeout_s <= 0 or poll_interval_s <= 0 or stable_polls < 1:
+        raise ValueError("settle timeout/interval must be positive and stable polls >= 1")
+
+    print(
+        "Waiting for Elasticsearch count to settle "
+        f"(timeout={timeout_s:g}s, interval={poll_interval_s:g}s, stable={stable_polls})..."
+    )
+    deadline = time.monotonic() + timeout_s
+    previous: int | None = None
+    consecutive = 0
+    current = get_es_count(index)
+    while True:
+        if current == previous:
+            consecutive += 1
+            if consecutive >= stable_polls:
+                print(f"Elasticsearch count settled at {current}.")
+                return current, True
+        else:
+            previous = current
+            consecutive = 0
+        if time.monotonic() >= deadline:
+            print(f"Elasticsearch count did not settle; using latest count {current}.")
+            return current, False
+        time.sleep(poll_interval_s)
+        current = get_es_count(index)
 
 
 def container_name(service: str, project: str = "amenonuboco-bench") -> str:
     return f"{project}-{service}-1"
 
 
-def count_client_log_lines(service: str, pattern: str, project: str = "amenonuboco-bench") -> int:
+def count_client_log_lines(
+    service: str, pattern: str, since: float, project: str = "amenonuboco-bench"
+) -> int:
+    """`docker logs --since <since>`で、このシナリオ実行が始まった時刻以降の
+    行だけを数える。
+
+    【罠ログ参照】旧版は`--since`を指定せず、コンテナ起動からの累積ログ全体を
+    数えていた。`run_benchmark.py`は`compose up -d`でコンテナを使い回す
+    （既に起動中のサービスに対しては何もしない）ため、同じコンテナに対して
+    シナリオを複数回実行すると、2回目以降は前回までの行が「送信数」に
+    混入し、実際には起きていないロスを人為的に作り出していた。ES側の
+    到達数は`get_es_count()`で最初から正しくdelta（差分）計測していたのに、
+    クライアント側だけ累積値を使うという非対称な集計になっていたのが原因。
+    `--since`でDocker自身に時刻フィルタさせることで、ES側と同じ「この実行
+    分だけ」を測る設計に揃える。
+    """
     name = container_name(service, project)
     proc = subprocess.run(
-        ["docker", "logs", name],
+        ["docker", "logs", "--since", str(since), name],
         capture_output=True, text=True, errors="replace",
     )
     text = proc.stdout + proc.stderr
     return sum(1 for line in text.splitlines() if pattern in line)
+
+
+def count_tcpreplay_packets(
+    service: str, since: float, project: str = "amenonuboco-bench"
+) -> int:
+    """tcpreplay終了時の統計から、今回実行分の送信パケット数を得る。"""
+    name = container_name(service, project)
+    proc = subprocess.run(
+        ["docker", "logs", "--since", str(since), name],
+        capture_output=True, text=True, errors="replace",
+    )
+    matches = re.findall(r"Actual:\s+(\d+)\s+packets", proc.stdout + proc.stderr)
+    return int(matches[-1]) if matches else 0
 
 
 def apply_interval_override(interval: float) -> None:
@@ -163,7 +258,16 @@ def regenerate_compose() -> None:
     ])
 
 
-def run_scenario(scenario: str, duration: int, interval: float | None) -> dict:
+def run_scenario(
+    scenario: str,
+    duration: int,
+    interval: float | None,
+    batch_size: int,
+    settle_timeout: float,
+    settle_poll_interval: float,
+    settle_stable_polls: int,
+    tcpreplay_pps: int | None,
+) -> dict:
     cfg = SCENARIOS[scenario]
     clients = cfg["clients"]
     servers = cfg["servers"]
@@ -176,30 +280,45 @@ def run_scenario(scenario: str, duration: int, interval: float | None) -> dict:
 
     if not wait_for_es():
         return {"scenario": scenario, "error": "elasticsearch not ready"}
+    if scenario == "C" and not wait_for_structurer_capture():
+        return {"scenario": scenario, "error": "log_structurer capture not ready"}
 
     initial_count = get_es_count(cfg["index"])
+    qdisc_before = qdisc_stats() if scenario == "C" else None
     print(f"Initial doc count: {initial_count}")
 
-    compose("up", "-d", *servers, *clients)
+    # `--since`用の基準時刻。compose up直前に取得する（コンテナが使い回され
+    # 既に起動中の場合、up -dは何もしないため、この時刻以降のログだけを
+    # 数えれば「今回の実行分」を正しく切り出せる）。
+    run_start_ts = int(time.time())
+
+    compose("up", "-d", *servers, *clients, batch_size=batch_size, tcpreplay_pps=tcpreplay_pps)
 
     print(f"Running for {duration} seconds...")
     time.sleep(duration)
 
-    # クライアント側の完了ラウンドトリップ数を、停止する前にログから数える
-    sent = 0
-    for c in clients:
-        pattern = CLIENT_COUNT_PATTERNS.get(c, cfg["count_pattern"] or "")
-        n = count_client_log_lines(c, pattern)
-        print(f"  {c}: {n} lines matching '{pattern}'")
-        sent += n
+    if cfg.get("sent_counter") == "tcpreplay":
+        # tcpreplayは終了時に初めてActual統計を出力する。`compose stop`は
+        # 既定の猶予時間中も再生が続くため、測定窓の直後にSIGINTを送る。
+        # tcpreplayはSIGINTで統計を出して終了する。
+        compose("kill", "-s", "SIGINT", *clients, batch_size=batch_size, tcpreplay_pps=tcpreplay_pps)
+        sent = sum(count_tcpreplay_packets(c, since=run_start_ts) for c in clients)
+        print(f"  tcpreplay: {sent} packets reported at SIGINT shutdown")
+    else:
+        # クライアント側の完了ラウンドトリップ数を、停止する前にログから数える
+        sent = 0
+        for c in clients:
+            pattern = CLIENT_COUNT_PATTERNS.get(c, cfg["count_pattern"] or "")
+            n = count_client_log_lines(c, pattern, since=run_start_ts)
+            print(f"  {c}: {n} lines matching '{pattern}'")
+            sent += n
+        compose("stop", *clients, *servers, batch_size=batch_size, tcpreplay_pps=tcpreplay_pps)
 
-    compose("stop", *clients, *servers)
-
-    print("Waiting 5 seconds for Elasticsearch ingest lag...")
-    time.sleep(5)
-
-    final_count = get_es_count(cfg["index"])
+    final_count, settled = wait_for_count_stable(
+        cfg["index"], settle_timeout, settle_poll_interval, settle_stable_polls
+    )
     received = final_count - initial_count
+    qdisc_after = qdisc_stats() if scenario == "C" else None
     throughput = received / duration
     loss_pct = max(0.0, (sent - received) / sent * 100) if sent > 0 else None
 
@@ -211,7 +330,12 @@ def run_scenario(scenario: str, duration: int, interval: float | None) -> dict:
         "es_received": received,
         "throughput_eps": round(throughput, 2),
         "loss_pct": round(loss_pct, 2) if loss_pct is not None else None,
+        "batch_size": batch_size,
+        "es_count_settled": settled,
     }
+    if scenario == "C":
+        result["qdisc_before"] = qdisc_before
+        result["qdisc_after"] = qdisc_after
     print(f"--- Result: {json.dumps(result, ensure_ascii=False)} ---")
     return result
 
@@ -229,17 +353,37 @@ def main() -> None:
         "--setup", action="store_true",
         help="計測前にベース基盤（router/elasticsearch/structurer）を起動する。",
     )
+    parser.add_argument("--batch-size", type=int, default=50, help="bulk_loaderのES投入バッチ件数")
+    parser.add_argument("--settle-timeout", type=float, default=None)
+    parser.add_argument("--settle-poll-interval", type=float, default=2.0)
+    parser.add_argument("--settle-stable-polls", type=int, default=3)
+    parser.add_argument("--tcpreplay-pps", type=int, default=None)
     args = parser.parse_args()
+
+    if args.batch_size < 1:
+        parser.error("--batch-size must be >= 1")
+    if args.tcpreplay_pps is not None and args.tcpreplay_pps < 1:
+        parser.error("--tcpreplay-pps must be >= 1")
+    if args.scenario != "C" and args.tcpreplay_pps is not None:
+        parser.error("--tcpreplay-pps is only valid with --scenario C")
 
     if not COMPOSE_FILE.exists() or args.setup:
         regenerate_compose()
 
     if args.setup:
-        compose("up", "-d", "wan_router", "elasticsearch", "log_structurer")
+        compose(
+            "up", "-d", "wan_router", "elasticsearch", "log_structurer",
+            batch_size=args.batch_size,
+        )
         if not wait_for_es():
             sys.exit(1)
 
-    result = run_scenario(args.scenario, args.duration, args.interval)
+    settle_timeout = args.settle_timeout if args.settle_timeout is not None else (300.0 if args.scenario == "C" else 60.0)
+    result = run_scenario(
+        args.scenario, args.duration, args.interval, args.batch_size,
+        settle_timeout, args.settle_poll_interval, args.settle_stable_polls,
+        args.tcpreplay_pps,
+    )
     print(json.dumps(result, ensure_ascii=False))
 
 

@@ -59,6 +59,18 @@ class DissectorPlugin(BaseModel):
     host_path: str
 
 
+class StructurerResourceLimits(BaseModel):
+    """structurerコンテナに適用するCgroups上限。
+
+    既定値はPhase9.5で導入した安全側の1 CPU/512MiBを維持する。高負荷の
+    シナリオはマニフェスト側で明示的に上書きし、プラットフォーム全体の
+    安全策を無条件に緩めない（Phase12 Tier2）。
+    """
+
+    cpus: str = "1.0"
+    memory: str = "512M"
+
+
 class Structuring(BaseModel):
     engine: Literal["tshark"] = "tshark"
     protocols: list[ProtocolMapping] = Field(default_factory=list)
@@ -69,6 +81,7 @@ class Structuring(BaseModel):
     # ことで、Elasticsearch資産の名前が変わっても壊れないようにする
     # (Phase3決定事項#43、計画書のスキーマ骨子から実装時に判明した抜けの補完)。
     elasticsearch_url: str = "http://elasticsearch:9200"
+    resources: StructurerResourceLimits = Field(default_factory=StructurerResourceLimits)
 
     # Phase11 Stage1C: 演習用暗号鍵注入アーキテクチャ（後方互換・全 Optional）
     # decryption を宣言すると、generators/structuring.py が tshark コマンドに

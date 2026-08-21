@@ -113,30 +113,17 @@ topology:
           - "TARGET=10.1.20.12"
           - "INTERVAL=0.001"
 
-    # ================= Scenario C: L2 Flood (PROFINET) =================
-    - name: sc_c_profinet_client1
+    # ================= Scenario C: L2 Flood (PROFINET / tcpreplay) =================
+    - name: sc_c_tcpreplay
       role: ot-asset
-      image: ../protocol-images/profinet
+      image: ../protocol-images/tcpreplay
       networks:
         - { segment: ot_lan, ip: 10.1.20.13 }
       overrides:
-        command: "python3 -u /app/run.py"
         cap_add: [ "NET_ADMIN", "NET_RAW" ]
         environment:
-          - "MODE=client"
-          - "INTERVAL=0.001" # 100pps
-
-    - name: sc_c_profinet_client2
-      role: ot-asset
-      image: ../protocol-images/profinet
-      networks:
-        - { segment: ot_lan, ip: 10.1.20.14 }
-      overrides:
-        command: "python3 -u /app/run.py"
-        cap_add: [ "NET_ADMIN", "NET_RAW" ]
-        environment:
-          - "MODE=client"
-          - "INTERVAL=0.001" # 100pps
+          - "TCREPLAY_PPS=${TCREPLAY_PPS:-5000}"
+          - "TCREPLAY_LOOP=0"
 
 instrumentation:
   mirror_to: mirror_link
@@ -144,6 +131,8 @@ instrumentation:
 
 structuring:
   engine: tshark
+  # Phase12 Tier2.5: CPU4は高負荷用の暫定設定。通常の安全側既定は維持する。
+  resources: { cpus: "4.0", memory: "512M" }
   protocols:
     - { name: modbus, output_index: ot-logs-modbus-* }
     - { name: opcua,  output_index: ot-logs-opcua-* }
