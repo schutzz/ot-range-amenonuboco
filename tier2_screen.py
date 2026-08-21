@@ -75,7 +75,12 @@ def run_condition(name: str, cpus: str, memory: str) -> dict:
         env=env,
     )
     wait_for_es()
-    run(["docker", "update", "--cpus", cpus, "--memory", memory, STRUCTURER])
+    # Docker はメモリ上限を既存のmemoryswap上限より大きく更新できない。
+    # 両方を同じ値にしてswapなしの明示的な制限として更新する。
+    run(
+        ["docker", "update", "--cpus", cpus, "--memory", memory,
+         "--memory-swap", memory, STRUCTURER]
+    )
     result = run(
         ["python", "platform/tools/run_benchmark.py", "--scenario", "B", "--duration", "30",
          "--batch-size", "100", "--settle-timeout", "60"],
