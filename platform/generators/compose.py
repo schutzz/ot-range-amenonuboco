@@ -131,6 +131,32 @@ _INSTALL_IPROUTE2 = (
     "(command -v apk >/dev/null 2>&1 && apk add --no-cache -q iproute2 >/dev/null 2>&1)"
 )
 
+# Phase12罠#057/#058: 自前command資産は`sh -c "..."`がコンテナのPID1として
+# 実行される。Linuxカーネルの仕様上、PID1はシグナルに未対応の(=trap未設定の)
+# ハンドラではデフォルト動作(SIGTERMなら終了)すら適用されず無条件に無視する
+# (root権限プロセスの誤停止を防ぐためのPID1特例)。この結果、`docker stop`の
+# SIGTERMは何も起こさないまま握りつぶされ、既定の猶予期間後に強制SIGKILL
+# (ExitCode=137)へ必ずエスカレートしていた。structuring.py/plugins.pyが
+# 生成する`( cmd1 & cmd2 & ... & wait )`のバックグラウンド構成では、この
+# SIGKILLがコンテナのnamespace/cgroup丸ごとの強制破棄として作用するため、
+# tshark/dumpcap等の子プロセスもクリーンな終了処理(終了時統計の出力等)を
+# 行う機会が一切無いまま巻き添えで消える(発覚経緯: 罠#056で提案した
+# 「tshark自己申告ドロップ数の確認」という診断手法が、この理由で常に
+# 空振りしていたと判明)。
+#
+# 【訂正】当初はcommand先頭で`trap '...' TERM INT`を自前追加する案を実装
+# したが、実機検証(docker run --name確認用の使い捨てコンテナで隔離再現)で
+# dash上のtrapは「フォアグラウンドの子プロセス(sleepや`wait`によるバック
+# グラウンドジョブ待ち)をブロックしている最中は確実には発火しない」ことが
+# 判明し、再現性が無かった(罠#058)。POSIX/dashのtrap配送タイミングという
+# シェル実装依存の内部動作に自前で対抗するのは不安定なため撤回。
+# 代わりにDocker公式の標準解であるinit process(tini、`docker run --init`/
+# compose `init: true`相当)を各サービスに付与する。tiniはPID1として動作し、
+# シグナルを子プロセス(グループ)へ正しく転送しつつゾンビ回収も行う、
+# この種の問題に対する実証済みの標準対策(実機確認: `--init`ありでは
+# `docker stop`が0.5秒でExitCode=143のクリーン終了、無しでは常に
+# 猶予期間満了+ExitCode=137)。
+
 
 def _assemble_command(
     mirroring_cmds: list[str],
@@ -416,6 +442,43 @@ def _service_block(
     )
     if command:
         service["command"] = command
+        # 罠#057/#058: 自前command(`sh -c "..."`)がコンテナのPID1になると、
+        # SIGTERMがカーネルのPID1特例で無条件に無視され、`docker stop`が
+        # 常に猶予期間満了+SIGKILL(ExitCode=137)へエスカレートする。加えて
+        # structuring/pluginの`( cmd & ... & wait )`構成では、SIGKILLが
+        # namespace/cgroupごとの強制破棄として効くため、tshark/dumpcap等の
+        # 子プロセスがクリーンな終了処理(統計出力等)を行う機会を失う。
+        # Docker公式のinit process(tini)をPID1として挟むことで、シグナルの
+        # 子プロセスへの転送とゾンビ回収を任せる、この種の問題に対する標準
+        # 対策(自前でtrap+kill 0を実装する案は、dash上でtrapがフォアグラウンド
+        # ブロック中に確実には発火しないことが実機検証で判明し撤回した)。
+        service["init"] = True
+        # 罠#058追記: Dockerの`init: true`(tini)は既定では「直接の子プロセス
+        # 1つ」にのみシグナルを転送する。structuring/pluginが生成する
+        # `( cmd1 & cmd2 & ... & wait )`は`sh -c`の中でさらにサブシェルへ
+        # forkするため、tsharkはtiniの直接の子から見て孫以下に位置し、
+        # 既定動作ではSIGTERMが届かない(実機検証: コンテナ全体はExitCode=143
+        # で"速く"終了するが、これはtiniの直接の子であるsh自身が死んだだけで、
+        # tshark等の孫プロセスは何も受け取らないまま、コンテナのnamespace
+        # 破棄に巻き込まれて消える)。`TINI_KILL_PROCESS_GROUP=1`(tini `-g`
+        # 相当)でプロセスグループ全体へ転送するモードに切り替える
+        # (non-interactiveなdashはjob control無効のため、pipe内・サブシェル
+        # 内の全子孫が同一PGIDを共有しており、グループ送信で確実に届く)。
+        #
+        # 実機確認できたのはここまで:「`docker stop`/`docker kill`が既定の
+        # 猶予期間満了+SIGKILL(137)へ必ずエスカレートしていた不具合」自体は
+        # この対策で解消し、`ExitCode=143`(SIGTERM)で高速かつクリーンに
+        # 終了するようになった(単体プロセスでの検証でも実測)。
+        # 一方、当初の目的だった「tsharkの終了時統計(X packets captured,
+        # Y packets dropped)をdocker logsで確認する」診断手法は、この対策後も
+        # 実機の構造化パイプライン(pipe+ネストしたサブシェル+4プロトコル
+        # 並行)では出力されないままだった(SIGTERM/SIGINT問わず)。単体の
+        # tshark(pipeなし・ネストなし)ではSIGINT(SIGTERMは不可)で
+        # "N packets captured"が出ることを確認しているため、pipe化または
+        # サブシェル経由のグループ一斉SIGINTがtshark/dumpcap間のIPCハンドオフ
+        # を壊している可能性が高いが、未特定(継続課題、罠#058参照)。
+        env_list.append("TINI_KILL_PROCESS_GROUP=1")
+        service["environment"] = env_list
 
     volumes: list[str] = []
     if structuring_cmds:

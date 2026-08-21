@@ -128,10 +128,25 @@ def container_name(service: str, project: str = "amenonuboco-bench") -> str:
     return f"{project}-{service}-1"
 
 
-def count_client_log_lines(service: str, pattern: str, project: str = "amenonuboco-bench") -> int:
+def count_client_log_lines(
+    service: str, pattern: str, since: float, project: str = "amenonuboco-bench"
+) -> int:
+    """`docker logs --since <since>`で、このシナリオ実行が始まった時刻以降の
+    行だけを数える。
+
+    【罠ログ参照】旧版は`--since`を指定せず、コンテナ起動からの累積ログ全体を
+    数えていた。`run_benchmark.py`は`compose up -d`でコンテナを使い回す
+    （既に起動中のサービスに対しては何もしない）ため、同じコンテナに対して
+    シナリオを複数回実行すると、2回目以降は前回までの行が「送信数」に
+    混入し、実際には起きていないロスを人為的に作り出していた。ES側の
+    到達数は`get_es_count()`で最初から正しくdelta（差分）計測していたのに、
+    クライアント側だけ累積値を使うという非対称な集計になっていたのが原因。
+    `--since`でDocker自身に時刻フィルタさせることで、ES側と同じ「この実行
+    分だけ」を測る設計に揃える。
+    """
     name = container_name(service, project)
     proc = subprocess.run(
-        ["docker", "logs", name],
+        ["docker", "logs", "--since", str(since), name],
         capture_output=True, text=True, errors="replace",
     )
     text = proc.stdout + proc.stderr
@@ -180,6 +195,11 @@ def run_scenario(scenario: str, duration: int, interval: float | None) -> dict:
     initial_count = get_es_count(cfg["index"])
     print(f"Initial doc count: {initial_count}")
 
+    # `--since`用の基準時刻。compose up直前に取得する（コンテナが使い回され
+    # 既に起動中の場合、up -dは何もしないため、この時刻以降のログだけを
+    # 数えれば「今回の実行分」を正しく切り出せる）。
+    run_start_ts = int(time.time())
+
     compose("up", "-d", *servers, *clients)
 
     print(f"Running for {duration} seconds...")
@@ -189,7 +209,7 @@ def run_scenario(scenario: str, duration: int, interval: float | None) -> dict:
     sent = 0
     for c in clients:
         pattern = CLIENT_COUNT_PATTERNS.get(c, cfg["count_pattern"] or "")
-        n = count_client_log_lines(c, pattern)
+        n = count_client_log_lines(c, pattern, since=run_start_ts)
         print(f"  {c}: {n} lines matching '{pattern}'")
         sent += n
 
