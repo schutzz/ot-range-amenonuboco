@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -25,7 +26,13 @@ CONDITIONS = (
 
 def run(command: list[str], *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     print(f"$ {' '.join(command)}", flush=True)
-    return subprocess.run(command, check=True, text=True, capture_output=True, env=env)
+    result = subprocess.run(command, text=True, capture_output=True, env=env)
+    if result.returncode:
+        raise RuntimeError(
+            f"command failed ({result.returncode}): {' '.join(command)}\n"
+            f"stdout: {result.stdout[-2000:]}\nstderr: {result.stderr[-2000:]}"
+        )
+    return result
 
 
 def write_status(**updates: object) -> None:
@@ -81,9 +88,13 @@ def run_condition(name: str, cpus: str, memory: str) -> dict:
 
 
 def main() -> None:
-    write_status(state="starting", total_conditions=len(CONDITIONS), completed_conditions=0)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--only", choices=[condition[0] for condition in CONDITIONS])
+    args = parser.parse_args()
+    conditions = tuple(condition for condition in CONDITIONS if not args.only or condition[0] == args.only)
+    write_status(state="starting", total_conditions=len(conditions), completed_conditions=0)
     try:
-        for index, condition in enumerate(CONDITIONS, start=1):
+        for index, condition in enumerate(conditions, start=1):
             run_condition(*condition)
             write_status(state="running", completed_conditions=index)
     except Exception as exc:
