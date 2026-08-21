@@ -2,6 +2,7 @@
 
 ![status](https://img.shields.io/badge/status-Phase%2011%20(Smart%20Factory%20Protocols)-brightgreen)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22051216.svg)](https://doi.org/10.5281/zenodo.22051216)
 [![CI](https://github.com/schutzz/ot-range-amenonuboco/actions/workflows/ci.yml/badge.svg)](https://github.com/schutzz/ot-range-amenonuboco/actions/workflows/ci.yml)
 [![Deploy GUI to Pages](https://github.com/schutzz/ot-range-amenonuboco/actions/workflows/pages.yml/badge.svg)](https://github.com/schutzz/ot-range-amenonuboco/actions/workflows/pages.yml)
 [![Live GUI Demo](https://img.shields.io/badge/GUI-Live%20Demo-blue)](https://schutzz.github.io/ot-range-amenonuboco/)
