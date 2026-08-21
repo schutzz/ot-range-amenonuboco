@@ -30,6 +30,7 @@ manifests/stress-test-reference.yaml を対象に、シナリオA/B/Cごとに
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import subprocess
@@ -99,7 +100,7 @@ def get_es_count(index: str) -> int:
             with urllib.request.urlopen(req, timeout=5) as res:
                 data = json.loads(res.read().decode())
                 total += data.get("count", 0)
-        except urllib.error.URLError as e:
+        except (urllib.error.URLError, http.client.HTTPException, OSError) as e:
             print(f"Warning: Failed to reach Elasticsearch ({idx}): {e}")
     return total
 
