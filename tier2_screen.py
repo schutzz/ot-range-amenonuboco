@@ -6,11 +6,14 @@ import subprocess
 import sys
 import time
 import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
 
 
 COMPOSE_FILE = "manifests/stress-test-reference.docker-compose.yml"
 PROJECT = "amenonuboco-bench"
 STRUCTURER = f"{PROJECT}-log_structurer-1"
+STATUS_FILE = Path("logs/tier2-status.json")
 CONDITIONS = (
     ("baseline", "1.0", "512m"),
     ("cpu_2", "2.0", "512m"),
@@ -23,6 +26,19 @@ CONDITIONS = (
 def run(command: list[str], *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     print(f"$ {' '.join(command)}", flush=True)
     return subprocess.run(command, check=True, text=True, capture_output=True, env=env)
+
+
+def write_status(**updates: object) -> None:
+    """IDEから確認できる、実行状態の単一情報源を原子的に更新する。"""
+    STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    current = {}
+    if STATUS_FILE.exists():
+        current = json.loads(STATUS_FILE.read_text(encoding="utf-8"))
+    current.update(updates)
+    current["updated_at"] = datetime.now(timezone.utc).isoformat()
+    temporary = STATUS_FILE.with_suffix(".tmp")
+    temporary.write_text(json.dumps(current, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(STATUS_FILE)
 
 
 def wait_for_es(timeout_s: int = 60) -> None:
@@ -39,6 +55,7 @@ def wait_for_es(timeout_s: int = 60) -> None:
 
 
 def run_condition(name: str, cpus: str, memory: str) -> dict:
+    write_status(state="running", condition=name, cpus=cpus, memory=memory)
     subprocess.run(
         ["docker", "compose", "-f", COMPOSE_FILE, "-p", PROJECT, "down", "-v"],
         check=False, capture_output=True, text=True,
@@ -58,13 +75,21 @@ def run_condition(name: str, cpus: str, memory: str) -> dict:
     )
     payload = json.loads(result.stdout.strip().splitlines()[-1])
     payload.update({"condition": name, "cpus": cpus, "memory": memory})
+    write_status(state="running", completed_condition=name, last_result=payload)
     print(json.dumps(payload, ensure_ascii=False), flush=True)
     return payload
 
 
 def main() -> None:
-    for condition in CONDITIONS:
-        run_condition(*condition)
+    write_status(state="starting", total_conditions=len(CONDITIONS), completed_conditions=0)
+    try:
+        for index, condition in enumerate(CONDITIONS, start=1):
+            run_condition(*condition)
+            write_status(state="running", completed_conditions=index)
+    except Exception as exc:
+        write_status(state="failed", error=str(exc))
+        raise
+    write_status(state="completed", condition=None)
 
 
 if __name__ == "__main__":
