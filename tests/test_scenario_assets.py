@@ -17,6 +17,7 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _SCENARIOS = _REPO_ROOT / "scenarios" / "legacy-power-grid-signals"
 _BULK_LOADER = _REPO_ROOT / "platform" / "generators" / "assets" / "bulk_loader.py"
+_PCAP_GENERATOR = _REPO_ROOT / "protocol-images" / "tcpreplay" / "generate_l2_flood_pcap.py"
 
 
 def _load_module(name: str, path: Path):
@@ -34,6 +35,22 @@ def dnp3_attack():
 @pytest.fixture(scope="module")
 def bulk_loader():
     return _load_module("bulk_loader", _BULK_LOADER)
+
+
+@pytest.fixture(scope="module")
+def l2_flood_pcap():
+    return _load_module("generate_l2_flood_pcap", _PCAP_GENERATOR)
+
+
+def test_l2_flood_pcap_contains_deterministic_profinet_frames(l2_flood_pcap, tmp_path):
+    """Tier4の再生素材がEtherType・Frame IDともPROFINET RTとして妥当。"""
+    path = tmp_path / "l2_flood.pcap"
+    l2_flood_pcap.write_pcap(path, frames=2)
+    data = path.read_bytes()
+    assert len(data) == 24 + 2 * (16 + 30)
+    first_frame_offset = 24 + 16
+    assert data[first_frame_offset + 12:first_frame_offset + 14] == b"\x88\x92"
+    assert data[first_frame_offset + 14:first_frame_offset + 16] == b"\x80\x00"
 
 
 # --- DNP3フレーム生成(前身 Phase-ex/dnp3_frame.py からの移植) ---------------
@@ -156,4 +173,3 @@ def test_modbus_overflow_attack_dry_run(modbus_attack):
 def test_evaluate_water_consequence_e2e(water_evaluator):
     """Phase 10 Stage 4-A: 水道 Digital Twin & Consequence E2E 総合評価が PASS すること。"""
     assert water_evaluator.run_evaluation() is True
-

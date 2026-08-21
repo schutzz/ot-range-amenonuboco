@@ -121,3 +121,14 @@ def test_structurer_resource_limits_can_be_overridden(presets, repo_root):
     compose = generate_compose(manifest, presets)
     limits = compose["services"]["log_structurer"]["deploy"]["resources"]["limits"]
     assert limits == {"cpus": "4.0", "memory": "512M"}
+
+
+def test_stress_manifest_uses_tcpreplay_for_scenario_c(presets, repo_root):
+    """Tier4はScapyループではなくtcpreplay専用アセットでL2負荷を作る。"""
+    from schema import load_manifest
+
+    manifest = load_manifest(repo_root / "manifests" / "stress-test-reference.yaml")
+    assets = {asset.name: asset for asset in manifest.topology.assets}
+    replay = assets["sc_c_tcpreplay"]
+    assert replay.image == "../protocol-images/tcpreplay"
+    assert "TCREPLAY_PPS=5000" in replay.overrides.environment

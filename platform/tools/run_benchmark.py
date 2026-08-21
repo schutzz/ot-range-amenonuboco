@@ -33,6 +33,7 @@ import argparse
 import http.client
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -69,10 +70,11 @@ SCENARIOS = {
         "count_pattern": None,  # クライアントごとにパターンが違うため個別指定（下記参照）
     },
     "C": {
-        "clients": ["sc_c_profinet_client1", "sc_c_profinet_client2"],
+        "clients": ["sc_c_tcpreplay"],
         "servers": [],  # L2ブロードキャストのみ。専用の受信側資産は無い
         "index": "ot-logs-pn_rt-*",
-        "count_pattern": "Sent PROFINET RT Frame",
+        "count_pattern": None,
+        "sent_counter": "tcpreplay",
     },
 }
 
@@ -81,8 +83,6 @@ CLIENT_COUNT_PATTERNS = {
     "sc_a_modbus_client": "wrote",
     "sc_b_opcua_client": "wrote",
     "sc_b_dnp3_client": "response from",
-    "sc_c_profinet_client1": "Sent PROFINET RT Frame",
-    "sc_c_profinet_client2": "Sent PROFINET RT Frame",
 }
 
 
@@ -191,6 +191,19 @@ def count_client_log_lines(
     return sum(1 for line in text.splitlines() if pattern in line)
 
 
+def count_tcpreplay_packets(
+    service: str, since: float, project: str = "amenonuboco-bench"
+) -> int:
+    """tcpreplay終了時の統計から、今回実行分の送信パケット数を得る。"""
+    name = container_name(service, project)
+    proc = subprocess.run(
+        ["docker", "logs", "--since", str(since), name],
+        capture_output=True, text=True, errors="replace",
+    )
+    matches = re.findall(r"Actual:\s+(\d+)\s+packets", proc.stdout + proc.stderr)
+    return int(matches[-1]) if matches else 0
+
+
 def apply_interval_override(interval: float) -> None:
     """マニフェストのINTERVALをその場で書き換えてコンポーズを再生成する。
 
@@ -251,15 +264,22 @@ def run_scenario(
     print(f"Running for {duration} seconds...")
     time.sleep(duration)
 
-    # クライアント側の完了ラウンドトリップ数を、停止する前にログから数える
-    sent = 0
-    for c in clients:
-        pattern = CLIENT_COUNT_PATTERNS.get(c, cfg["count_pattern"] or "")
-        n = count_client_log_lines(c, pattern, since=run_start_ts)
-        print(f"  {c}: {n} lines matching '{pattern}'")
-        sent += n
-
-    compose("stop", *clients, *servers, batch_size=batch_size)
+    if cfg.get("sent_counter") == "tcpreplay":
+        # tcpreplayは終了時に初めてActual統計を出力する。`compose stop`は
+        # 既定の猶予時間中も再生が続くため、測定窓の直後にSIGINTを送る。
+        # tcpreplayはSIGINTで統計を出して終了する。
+        compose("kill", "-s", "SIGINT", *clients, batch_size=batch_size)
+        sent = sum(count_tcpreplay_packets(c, since=run_start_ts) for c in clients)
+        print(f"  tcpreplay: {sent} packets reported at SIGINT shutdown")
+    else:
+        # クライアント側の完了ラウンドトリップ数を、停止する前にログから数える
+        sent = 0
+        for c in clients:
+            pattern = CLIENT_COUNT_PATTERNS.get(c, cfg["count_pattern"] or "")
+            n = count_client_log_lines(c, pattern, since=run_start_ts)
+            print(f"  {c}: {n} lines matching '{pattern}'")
+            sent += n
+        compose("stop", *clients, *servers, batch_size=batch_size)
 
     final_count, settled = wait_for_count_stable(
         cfg["index"], settle_timeout, settle_poll_interval, settle_stable_polls
