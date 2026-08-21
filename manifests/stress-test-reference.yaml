@@ -144,6 +144,9 @@ instrumentation:
 
 structuring:
   engine: tshark
+  # Phase12 Tier2: Scenario BではCPU 4コアが1コア比で平均25.6%高い。
+  # 通常マニフェストの安全側既定(1.0 CPU/512MiB)は変えず、負荷計測用だけ明示する。
+  resources: { cpus: "4.0", memory: "512M" }
   protocols:
     - { name: modbus, output_index: ot-logs-modbus-* }
     - { name: opcua,  output_index: ot-logs-opcua-* }

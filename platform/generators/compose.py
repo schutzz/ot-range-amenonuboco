@@ -545,11 +545,12 @@ def _service_block(
     # 必要な資産)に対して deploy.resources.limits (CPU / Memory制限) を設定し、
     # 破損パケットや無限ループ発生時のホスト巻き添えダウンを抑止する。
     if asset.role == "structurer":
+        limits = structuring.resources if structuring is not None else None
         service["deploy"] = {
             "resources": {
                 "limits": {
-                    "cpus": "1.0",
-                    "memory": "512M",
+                    "cpus": limits.cpus if limits is not None else "1.0",
+                    "memory": limits.memory if limits is not None else "512M",
                 }
             }
         }

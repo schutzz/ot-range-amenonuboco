@@ -111,3 +111,13 @@ def test_structurer_has_cgroups_limits(compose):
     limits = structurer_svc["deploy"]["resources"]["limits"]
     assert limits["cpus"] == "1.0"
     assert limits["memory"] == "512M"
+
+
+def test_structurer_resource_limits_can_be_overridden(presets, repo_root):
+    """負荷計測用マニフェストは安全側既定値を明示的に上書きできる。"""
+    from schema import load_manifest
+
+    manifest = load_manifest(repo_root / "manifests" / "stress-test-reference.yaml")
+    compose = generate_compose(manifest, presets)
+    limits = compose["services"]["log_structurer"]["deploy"]["resources"]["limits"]
+    assert limits == {"cpus": "4.0", "memory": "512M"}
