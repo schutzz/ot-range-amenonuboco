@@ -478,6 +478,11 @@ def _service_block(
         # サブシェル経由のグループ一斉SIGINTがtshark/dumpcap間のIPCハンドオフ
         # を壊している可能性が高いが、未特定(継続課題、罠#058参照)。
         env_list.append("TINI_KILL_PROCESS_GROUP=1")
+        if structuring_cmds:
+            # バルクローダーのバッチサイズは既定50件を維持しつつ、Compose実行時の
+            # 環境変数で上書きできるようにする。Phase12の性能測定では同一の生成物
+            # を使ったまま50/100/200件を比較するため、この差し込み口を利用する。
+            env_list.append("BULK_LOADER_BATCH_SIZE=${BULK_LOADER_BATCH_SIZE:-50}")
         service["environment"] = env_list
 
     volumes: list[str] = []

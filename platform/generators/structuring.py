@@ -108,10 +108,10 @@ def generate_structuring_commands(
             f'tshark -i $STRUCT_IF -T ek -Y "{proto.name}"{tls_opt_str} -l | '
             f"python3 {BULK_LOADER_CONTAINER_PATH} "
             f'--index "{proto.output_index}" '
-            f'--es-url "{structuring.elasticsearch_url}" &'
+            f'--es-url "{structuring.elasticsearch_url}" '
+            f'--batch-size "${{BULK_LOADER_BATCH_SIZE:-50}}" &'
         )
         for proto in structuring.protocols
     ]
     commands.append(f"( {' '.join(launches)} wait )")
     return commands
-

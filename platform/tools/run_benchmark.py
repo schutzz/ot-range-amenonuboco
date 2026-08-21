@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -119,9 +120,45 @@ def wait_for_es(timeout_s: int = 60) -> bool:
     return False
 
 
-def compose(*args: str, project: str = "amenonuboco-bench") -> subprocess.CompletedProcess:
+def compose(
+    *args: str, project: str = "amenonuboco-bench", batch_size: int | None = None
+) -> subprocess.CompletedProcess:
     cmd = ["docker", "compose", "-f", str(COMPOSE_FILE), "-p", project, *args]
-    return sh(cmd)
+    env = None
+    if batch_size is not None:
+        env = os.environ | {"BULK_LOADER_BATCH_SIZE": str(batch_size)}
+    return sh(cmd, env=env)
+
+
+def wait_for_count_stable(
+    index: str, timeout_s: float, poll_interval_s: float, stable_polls: int
+) -> tuple[int, bool]:
+    """ESの件数が連続して変化しなくなるまで待ち、最終到達数を返す。"""
+    if timeout_s <= 0 or poll_interval_s <= 0 or stable_polls < 1:
+        raise ValueError("settle timeout/interval must be positive and stable polls >= 1")
+
+    print(
+        "Waiting for Elasticsearch count to settle "
+        f"(timeout={timeout_s:g}s, interval={poll_interval_s:g}s, stable={stable_polls})..."
+    )
+    deadline = time.monotonic() + timeout_s
+    previous: int | None = None
+    consecutive = 0
+    current = get_es_count(index)
+    while True:
+        if current == previous:
+            consecutive += 1
+            if consecutive >= stable_polls:
+                print(f"Elasticsearch count settled at {current}.")
+                return current, True
+        else:
+            previous = current
+            consecutive = 0
+        if time.monotonic() >= deadline:
+            print(f"Elasticsearch count did not settle; using latest count {current}.")
+            return current, False
+        time.sleep(poll_interval_s)
+        current = get_es_count(index)
 
 
 def container_name(service: str, project: str = "amenonuboco-bench") -> str:
@@ -178,7 +215,15 @@ def regenerate_compose() -> None:
     ])
 
 
-def run_scenario(scenario: str, duration: int, interval: float | None) -> dict:
+def run_scenario(
+    scenario: str,
+    duration: int,
+    interval: float | None,
+    batch_size: int,
+    settle_timeout: float,
+    settle_poll_interval: float,
+    settle_stable_polls: int,
+) -> dict:
     cfg = SCENARIOS[scenario]
     clients = cfg["clients"]
     servers = cfg["servers"]
@@ -200,7 +245,7 @@ def run_scenario(scenario: str, duration: int, interval: float | None) -> dict:
     # 数えれば「今回の実行分」を正しく切り出せる）。
     run_start_ts = int(time.time())
 
-    compose("up", "-d", *servers, *clients)
+    compose("up", "-d", *servers, *clients, batch_size=batch_size)
 
     print(f"Running for {duration} seconds...")
     time.sleep(duration)
@@ -213,12 +258,11 @@ def run_scenario(scenario: str, duration: int, interval: float | None) -> dict:
         print(f"  {c}: {n} lines matching '{pattern}'")
         sent += n
 
-    compose("stop", *clients, *servers)
+    compose("stop", *clients, *servers, batch_size=batch_size)
 
-    print("Waiting 5 seconds for Elasticsearch ingest lag...")
-    time.sleep(5)
-
-    final_count = get_es_count(cfg["index"])
+    final_count, settled = wait_for_count_stable(
+        cfg["index"], settle_timeout, settle_poll_interval, settle_stable_polls
+    )
     received = final_count - initial_count
     throughput = received / duration
     loss_pct = max(0.0, (sent - received) / sent * 100) if sent > 0 else None
@@ -231,6 +275,8 @@ def run_scenario(scenario: str, duration: int, interval: float | None) -> dict:
         "es_received": received,
         "throughput_eps": round(throughput, 2),
         "loss_pct": round(loss_pct, 2) if loss_pct is not None else None,
+        "batch_size": batch_size,
+        "es_count_settled": settled,
     }
     print(f"--- Result: {json.dumps(result, ensure_ascii=False)} ---")
     return result
@@ -249,17 +295,30 @@ def main() -> None:
         "--setup", action="store_true",
         help="計測前にベース基盤（router/elasticsearch/structurer）を起動する。",
     )
+    parser.add_argument("--batch-size", type=int, default=50, help="bulk_loaderのES投入バッチ件数")
+    parser.add_argument("--settle-timeout", type=float, default=60.0)
+    parser.add_argument("--settle-poll-interval", type=float, default=2.0)
+    parser.add_argument("--settle-stable-polls", type=int, default=3)
     args = parser.parse_args()
+
+    if args.batch_size < 1:
+        parser.error("--batch-size must be >= 1")
 
     if not COMPOSE_FILE.exists() or args.setup:
         regenerate_compose()
 
     if args.setup:
-        compose("up", "-d", "wan_router", "elasticsearch", "log_structurer")
+        compose(
+            "up", "-d", "wan_router", "elasticsearch", "log_structurer",
+            batch_size=args.batch_size,
+        )
         if not wait_for_es():
             sys.exit(1)
 
-    result = run_scenario(args.scenario, args.duration, args.interval)
+    result = run_scenario(
+        args.scenario, args.duration, args.interval, args.batch_size,
+        args.settle_timeout, args.settle_poll_interval, args.settle_stable_polls,
+    )
     print(json.dumps(result, ensure_ascii=False))
 
 
