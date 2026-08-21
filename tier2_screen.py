@@ -87,19 +87,33 @@ def run_condition(name: str, cpus: str, memory: str) -> dict:
     )
     payload = json.loads(result.stdout.strip().splitlines()[-1])
     payload.update({"condition": name, "cpus": cpus, "memory": memory})
-    write_status(state="running", completed_condition=name, last_result=payload)
+    current = json.loads(STATUS_FILE.read_text(encoding="utf-8"))
+    history = list(current.get("results", []))
+    history.append(payload)
+    write_status(
+        state="running", completed_condition=name, last_result=payload,
+        results=history, error=None, last_error=None,
+    )
     print(json.dumps(payload, ensure_ascii=False), flush=True)
     return payload
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--only", choices=[condition[0] for condition in CONDITIONS])
+    parser.add_argument("--only", action="append", choices=[condition[0] for condition in CONDITIONS])
+    parser.add_argument("--repeat", type=int, default=1)
     args = parser.parse_args()
-    conditions = tuple(condition for condition in CONDITIONS if not args.only or condition[0] == args.only)
-    write_status(state="starting", total_conditions=len(conditions), completed_conditions=0)
+    if args.repeat < 1:
+        parser.error("--repeat must be >= 1")
+    conditions = tuple(condition for condition in CONDITIONS if not args.only or condition[0] in args.only)
+    schedule = tuple(
+        condition
+        for trial in range(args.repeat)
+        for condition in conditions[trial % len(conditions):] + conditions[:trial % len(conditions)]
+    )
+    write_status(state="starting", total_conditions=len(schedule), completed_conditions=0)
     try:
-        for index, condition in enumerate(conditions, start=1):
+        for index, condition in enumerate(schedule, start=1):
             run_condition(*condition)
             write_status(state="running", completed_conditions=index)
     except Exception as exc:
