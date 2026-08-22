@@ -97,6 +97,8 @@ Read [`CONTRIBUTING.md`](./CONTRIBUTING.md) before opening a change. It requires
 
 The archived Phase 12 release is available at [Zenodo](https://doi.org/10.5281/zenodo.22051216). Citation metadata is in [`CITATION.cff`](./CITATION.cff).
 
+The complete project and release history is in [Release Notes](./docs/releases/README.md).
+
 [Apache License 2.0](./LICENSE). When redistributing modifications, retain required attribution in [`NOTICE`](./NOTICE) and mark modified files as required by the license.
 
 ---
