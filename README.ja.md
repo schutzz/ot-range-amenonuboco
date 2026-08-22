@@ -28,7 +28,27 @@ docker compose up -d
 python platform/cli.py diagram manifests/power-grid-reference.yaml
 ```
 
+起動後は次で最低限の成功確認を行います。
+
+```bash
+docker compose ps
+# 生成されたサービスが起動状態であることを確認
+
+python platform/cli.py diagram manifests/power-grid-reference.yaml
+# generated: manifests/power-grid-reference.network-diagram.html を確認
+```
+
+図はマニフェストと同じ場所に生成され、ローカルブラウザで開けます。`docker compose ps`はコンテナの起動状態を確認するものであり、観測・検知の成否は[`docs/showcase/`](./docs/showcase/)のシナリオ別ウォークスルーで確認してください。
+
 Compose起動前に無関係なコンテナ・ネットワークを停止してください。Grafana等が固定ホストポートを使うため、残留コンテナは競合や観測検証の不確実性を招きます。性能証跡の参照環境はDocker Desktopであり、全環境・本番環境への性能保証ではありません。
+
+## 要件と制約
+
+- **確認済みツール**：Python 3.10–3.12、Docker Compose、ローカルDockerエンジン。公開性能証跡はDocker Desktopで取得しており、Linuxホスト、他のDockerランタイム、本番環境を独立に検証したものではありません。
+- **資源の目安**：tshark structurerのスキーマ既定値は1.0 CPU・512Mメモリです。ElasticsearchやGrafana等の資産はマニフェストごとに異なるため、ホスト全体のCPU・メモリ・ディスク・ポート要件に共通最小値は主張しません。
+- **高負荷測定の範囲**：200,000 ppsはDocker Desktop参照環境で高負荷用structurer構成を選んだ探索上限であり、サイジング推奨値や絶対上限ではありません。
+- **ラボ限定**：生成環境は隔離された許可済み環境だけで使用します。実OT/ICS設備、本番ネットワーク、無許可システムへの接続は検証対象外です。
+- **ポートとライフサイクル**：一部マニフェストは固定ホストポートを公開します。起動前に無関係なコンテナを停止し、観測・検知・データ検証はシナリオ別文書に従ってください。
 
 ## エディタ・機能・資産
 
