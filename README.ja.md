@@ -60,6 +60,8 @@ pytest
 
 Phase 12リリースは[Zenodo DOI](https://doi.org/10.5281/zenodo.22051216)で公開しています。引用情報は[`CITATION.cff`](./CITATION.cff)、ライセンスは[Apache License 2.0](./LICENSE)です。
 
+全Phaseとリリースの履歴は[Release Notes](./docs/releases/README.md)にまとめています。
+
 ---
 
 🤖 このプロジェクトは [Claude Code](https://claude.com/claude-code) と [Codex](https://openai.com/codex/) を用いて開発されています。
