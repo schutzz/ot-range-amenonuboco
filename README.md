@@ -91,7 +91,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-Read [`CONTRIBUTING.md`](./CONTRIBUTING.md) before opening a change. It requires isolated-lab safety, focused pull requests, appropriate tests, reproducible evidence for performance claims, and synchronized English/Japanese documentation.
+Read [`CONTRIBUTING.md`](./CONTRIBUTING.md) before opening a change. It requires isolated-lab safety, focused pull requests, appropriate tests, reproducible evidence for performance claims, and synchronized English/Japanese documentation. Security-sensitive reports follow [`SECURITY.md`](./SECURITY.md), not public Issues.
 
 ## Citation and license
 

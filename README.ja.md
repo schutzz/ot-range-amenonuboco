@@ -56,7 +56,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-変更前に[`CONTRIBUTING.md`](./CONTRIBUTING.md)を読んでください。隔離環境での安全性、焦点を絞ったPR、対応テスト、性能主張の再現可能な証跡、英日文書の同期を必須にしています。
+変更前に[`CONTRIBUTING.md`](./CONTRIBUTING.md)を読んでください。隔離環境での安全性、焦点を絞ったPR、対応テスト、性能主張の再現可能な証跡、英日文書の同期を必須にしています。脆弱性などの安全上の報告は公開Issueではなく[`SECURITY.md`](./SECURITY.md)に従ってください。
 
 Phase 12リリースは[Zenodo DOI](https://doi.org/10.5281/zenodo.22051216)で公開しています。引用情報は[`CITATION.cff`](./CITATION.cff)、ライセンスは[Apache License 2.0](./LICENSE)です。
 

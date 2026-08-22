@@ -7,6 +7,7 @@ Thank you for improving Amenonuboco. Because this project models OT/ICS environm
 - Use only isolated, authorized local laboratory environments. Never target production systems, real OT/ICS equipment, or networks you do not explicitly control.
 - Do not commit credentials, private keys, tokens, customer data, sensitive packet captures, or environment-specific configuration.
 - Describe any network-facing behavior and its intended lab-only scope in the pull request.
+- Report security-sensitive defects through the private channel described in [`SECURITY.md`](./SECURITY.md), not through a public issue or pull request.
 
 ## Change process
 
