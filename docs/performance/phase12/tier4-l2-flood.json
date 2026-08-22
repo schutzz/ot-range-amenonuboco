@@ -1,5 +1,5 @@
 {
-  "scenario": "C", "environment": "Docker Desktop", "duration_s": 10, "settle_timeout_s": 300,
+  "scenario": "C", "environment": "Docker Desktop", "duration_s": 10, "settle_timeout_s": 300, "exploration_cap_pps": 200000,
   "results": [
     {"pps":25000,"sent":248430,"received":248400,"loss_pct":0.01,"settled":true,"qdisc_drops":0},
     {"pps":25000,"sent":250141,"received":250100,"loss_pct":0.02,"settled":true,"qdisc_drops":0},
@@ -7,5 +7,10 @@
     {"pps":50000,"sent":498140,"received":498100,"loss_pct":0.01,"settled":true,"qdisc_drops":0},
     {"pps":50000,"sent":498597,"received":498500,"loss_pct":0.02,"settled":true,"qdisc_drops":0},
     {"pps":50000,"sent":497973,"received":497900,"loss_pct":0.01,"settled":true,"qdisc_drops":0}
+    ,{"pps":100000,"sent":866238,"received":866200,"loss_pct":0.00,"settled":true,"qdisc_drops":0}
+    ,{"pps":150000,"sent":1079162,"received":1079100,"loss_pct":0.01,"settled":true,"qdisc_drops":0}
+    ,{"pps":200000,"sent":789094,"received":789000,"loss_pct":0.01,"settled":true,"qdisc_drops":0}
+    ,{"pps":200000,"sent":978232,"received":978200,"loss_pct":0.00,"settled":true,"qdisc_drops":0}
+    ,{"pps":200000,"sent":1150952,"received":1150900,"loss_pct":0.00,"settled":true,"qdisc_drops":0}
   ]
 }
