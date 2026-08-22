@@ -38,7 +38,27 @@ Generate the matching self-contained diagram with:
 python platform/cli.py diagram manifests/power-grid-reference.yaml
 ```
 
+Confirm a successful local start with:
+
+```bash
+docker compose ps
+# Confirm that the generated services are running.
+
+python platform/cli.py diagram manifests/power-grid-reference.yaml
+# Confirm: generated: manifests/power-grid-reference.network-diagram.html
+```
+
+The diagram is generated beside the manifest and can be opened locally in a browser. `docker compose ps` confirms container lifecycle only; it is not a substitute for the scenario-specific observation and detection walkthroughs in [`docs/showcase/`](./docs/showcase/).
+
 Before a Docker Compose run, stop unrelated containers and networks. The reference environment uses fixed host ports for components such as Grafana; residual containers can cause port conflicts and invalidate end-to-end observation checks. Docker Desktop is the reference environment for the published performance evidence, not a claim about every host or production deployment.
+
+## Requirements and limitations
+
+- **Verified tooling:** Python 3.10–3.12, Docker Compose, and a local Docker engine. The published performance evidence was collected on Docker Desktop; it is not an independent validation of Linux hosts, other Docker runtimes, or production deployments.
+- **Resource guidance:** the schema default for a tshark structurer is 1.0 CPU and 512M memory. Individual manifests add assets such as Elasticsearch and Grafana, so host-wide CPU, memory, disk, and port requirements depend on the selected manifest. No universal host minimum is claimed.
+- **High-load scope:** the 200,000 pps result is a Docker Desktop reference-environment exploration cap with a deliberately selected high-load structurer configuration; it is not a sizing recommendation or absolute limit.
+- **Laboratory-only scope:** use generated ranges only in isolated, authorized environments. The repository does not validate attachment to real industrial equipment, production networks, or unauthorized systems.
+- **Port and lifecycle constraints:** some manifests publish fixed host ports. Stop unrelated containers before a run and use the manifest-specific documentation for scenario, detection, and data-validation expectations.
 
 ## Try the manifest editor
 
