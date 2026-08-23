@@ -2,7 +2,7 @@
 
 [日本語](./README.ja.md)
 
-![status](https://img.shields.io/badge/status-Phase%2012%20(Performance%20Evidence)-brightgreen)
+![status](https://img.shields.io/badge/status-v0.13.0%20(Generic%20Observability%20Contract)-brightgreen)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22051216.svg)](https://doi.org/10.5281/zenodo.22051216)
 [![CI](https://github.com/schutzz/ot-range-amenonuboco/actions/workflows/ci.yml/badge.svg)](https://github.com/schutzz/ot-range-amenonuboco/actions/workflows/ci.yml)
@@ -13,6 +13,8 @@
 ![A self-contained network diagram generated from one power-grid manifest](./docs/images/network-diagram-power.png)
 
 One manifest, such as [`power-grid-reference.yaml`](./manifests/power-grid-reference.yaml), generates a Docker Compose topology, traffic-mirroring instrumentation, and a tshark-based structuring pipeline. Amenonuboco calls this approach **Cyber Range as Code (CRaC)**: treat the range itself as declarative, reproducible infrastructure.
+
+**Current release:** [`v0.13.0`](./releases/tag/v0.13.0) adds the Generic Observability Contract: a manifest can declare required observable segments and `validate` rejects contradictions before provisioning. Phase 12 remains the archived performance-evidence milestone; see [Release Notes](./docs/releases/README.md) for the complete history.
 
 ## Why it exists
 
@@ -66,6 +68,8 @@ The [browser-based manifest editor](https://schutzz.github.io/ot-range-amenonubo
 
 ## Platform capabilities
 
+- **Pre-provision validation**: `python platform/cli.py validate <manifest>` validates schema and cross-layer constraints without generating or starting a range.
+- **Generic Observability Contract**: optional `observability_contract.required_segments` assertions reject undefined, excluded, or otherwise unobserved required segments before provisioning. See [manifest schema §3.1](./docs/manifest-schema-guide.md#31-可観測性契約observability_contract任意).
 - **tshark by default for structuring**, using Wireshark dissectors for broad protocol coverage.
 - **Clear responsibilities**: the platform provisions through structuring; detection logic belongs to scenario assets.
 - **Optional specialist parsers**: Spicy/Zeek are plugins for stateful detection, high-load cases, or non-standard payloads.
