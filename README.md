@@ -14,7 +14,7 @@
 
 One manifest, such as [`power-grid-reference.yaml`](./manifests/power-grid-reference.yaml), generates a Docker Compose topology, traffic-mirroring instrumentation, and a tshark-based structuring pipeline. Amenonuboco calls this approach **Cyber Range as Code (CRaC)**: treat the range itself as declarative, reproducible infrastructure.
 
-**Current release:** [`v0.13.0`](./releases/tag/v0.13.0) adds the Generic Observability Contract: a manifest can declare required observable segments and `validate` rejects contradictions before provisioning. Phase 12 remains the archived performance-evidence milestone; see [Release Notes](./docs/releases/README.md) for the complete history.
+**Current release:** [`v0.13.0`](https://github.com/schutzz/ot-range-amenonuboco/releases/tag/v0.13.0) adds the Generic Observability Contract: a manifest can declare required observable segments and `validate` rejects contradictions before provisioning. Phase 12 remains the archived performance-evidence milestone; see [Release Notes](./docs/releases/README.md) for the complete history.
 
 ## Why it exists
 
