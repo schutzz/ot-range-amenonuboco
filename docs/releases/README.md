@@ -2,6 +2,15 @@
 
 This page is the public, human-readable history of Amenonuboco. It summarizes every completed phase and links release tags to their scope. Detailed implementation history remains available in the [Git commit log](../../commits/main).
 
+## v0.13.0 — Generic Observability Contract
+
+**Tag:** [`v0.13.0`](https://github.com/schutzz/ot-range-amenonuboco/tree/v0.13.0)  
+**Released:** 2026-08-24
+
+Added an optional, protocol-independent `observability_contract.required_segments` manifest field. A manifest author can declare that a segment must be present in the instrumentation layer's computed observed-segment set; `validate` rejects the manifest before provisioning — naming both the requirement and the segment — when that condition is not met. The capability contains no protocol, detector, address, or scenario-specific behavior. Interface and validation semantics: [`docs/manifest-schema-guide.md`](../manifest-schema-guide.md), section 3.1.
+
+Backward compatible: the field is optional and absent by default. No existing manifest, schema default, or provisioning behavior changes.
+
 ## v0.12.0 — Verified Performance Evidence
 
 **Tag:** [`v0.12.0`](https://github.com/schutzz/ot-range-amenonuboco/tree/v0.12.0)  
