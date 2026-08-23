@@ -283,6 +283,7 @@ class Manifest(BaseModel):
     metadata: Metadata
     topology: Topology
     instrumentation: Optional["Instrumentation"] = None
+    observability_contract: Optional["ObservabilityContract"] = None
     structuring: Optional["Structuring"] = None
     detection: Optional["Detection"] = None
     attack: Optional["Attack"] = None
@@ -411,6 +412,7 @@ class Manifest(BaseModel):
 from .attack import Attack  # noqa: E402
 from .detection import Detection  # noqa: E402
 from .instrumentation import Instrumentation  # noqa: E402
+from .instrumentation import ObservabilityContract  # noqa: E402
 from .structuring import Structuring  # noqa: E402
 from .visualization import Visualization  # noqa: E402
 

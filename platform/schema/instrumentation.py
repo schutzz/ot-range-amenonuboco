@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # topology.py が本モジュールを(Manifest.instrumentationフィールドの型として)
 # importするため、ここでtopology.pyをトップレベルでimportすると循環importになる。
@@ -38,6 +38,23 @@ class Instrumentation(BaseModel):
         """
         skip = {self.mirror_to, *self.exclude}
         return [s for s in topology.segments if s.name not in skip]
+
+
+class ObservabilityContract(BaseModel):
+    """利用者が観測可能であることを要求するセグメントの汎用宣言。
+
+    セグメント名が実在するか、または実際に観測対象に含まれるかという
+    トポロジとの関係は、Manifestのクロスレイヤー検証で扱う。このモデルは
+    その要求をプロトコル・検知器・シナリオに依存せず表現する責務だけを持つ。
+    """
+
+    required_segments: list[str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _validate_unique_required_segments(self) -> "ObservabilityContract":
+        if len(self.required_segments) != len(set(self.required_segments)):
+            raise ValueError("observability_contract.required_segments must be unique")
+        return self
 
 
 def validate_instrumentation(instrumentation: Instrumentation, topology: Topology) -> None:
