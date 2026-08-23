@@ -41,6 +41,9 @@ instrumentation:   # ② 観測（ミラーリング）
   mirror_to: ...
   exclude: [...]
 
+observability_contract:  # 任意：計装層の計算結果に対する事後条件（§3.1）
+  required_segments: [...]
+
 structuring:       # ③ 構造化（tshark既定）
   engine: tshark
   protocols: [...]
@@ -251,6 +254,28 @@ instrumentation:
 - 双方向カバレッジの保証（片方向欠落を作らないこと）
 
 > **設計意図**：前身 `ot-ids-verum` が `setup_mirror.sh` の手書きで繰り返し踏んだミラーリングの非対称性・冪等化漏れ・インターフェース名シャッフルを、生成ロジック側で構造的に排除します。観測の死角が生じたかどうかは、ネットワーク図にそのまま反映されます。
+
+### 3.1 可観測性契約（`observability_contract`、任意）
+
+`instrumentation` はオプトアウト方式（§3参照）で観測対象セグメントの集合を**計算**します。`observability_contract` は、その計算結果に対する事後条件——「このセグメントは必ず観測対象に含まれていなければならない」——を宣言する**任意**ブロックです。トポロジ・計装そのものを変更するものではなく、両者の宣言が意図どおりの結果になっているかを `validate` の時点（プロビジョニング開始前）で確認するためだけに存在します。
+
+```yaml
+observability_contract:
+  required_segments:
+    - control          # instrumentation の計算結果(observed_segments)に含まれている必要があるセグメント名
+```
+
+| フィールド | 必須 | 説明 |
+|---|---|---|
+| `required_segments` | ✅（本ブロックを書く場合） | 観測対象集合に含まれていることを要求するセグメント名の配列。1件以上必須、重複不可 |
+
+**検証内容（`validate`／プロビジョニング前）**：
+
+- ブロックを宣言する場合、`instrumentation` も宣言されている必要があります（`instrumentation` が無いと観測対象集合を計算できないため）。
+- `required_segments` の各要素が `topology.segments` に実在しない場合は拒否します（未定義セグメント参照）。
+- `required_segments` の各要素が `instrumentation.observed_segments()` の計算結果に含まれない場合——`exclude` されている、または `mirror_to` 自身を指定した場合——は、プロビジョニングを開始せずに拒否します。エラーメッセージは要求元のフィールド（`observability_contract.required_segments`）と対象セグメント名の両方を含みます。
+
+**このブロックが宣言しないこと**：プロトコル・検知ロジック・攻撃シナリオ・特定の資産やIPアドレスには一切関知しません。マニフェスト作成者が「このセグメントは死角にしてはならない」という要求を、`instrumentation.exclude` の書き忘れや新規セグメント追加時の計装追記漏れから独立して、宣言時点で自己点検できるようにするための汎用インターフェースです。
 
 ---
 
