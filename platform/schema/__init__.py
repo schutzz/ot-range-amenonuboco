@@ -1,6 +1,6 @@
 from .attack import Attack, AttackEngine, CalderaAgent, CalderaEngine
 from .detection import Detection, DetectionPlugin
-from .instrumentation import Instrumentation
+from .instrumentation import Instrumentation, ObservabilityContract
 from .loader import ManifestLoadError, load_manifest
 from .presets import (
     PresetLoadError,
@@ -37,6 +37,7 @@ __all__ = [
     "Detection",
     "DetectionPlugin",
     "Instrumentation",
+    "ObservabilityContract",
     "Manifest",
     "ManifestLoadError",
     "Metadata",

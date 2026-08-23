@@ -283,6 +283,7 @@ class Manifest(BaseModel):
     metadata: Metadata
     topology: Topology
     instrumentation: Optional["Instrumentation"] = None
+    observability_contract: Optional["ObservabilityContract"] = None
     structuring: Optional["Structuring"] = None
     detection: Optional["Detection"] = None
     attack: Optional["Attack"] = None
@@ -313,6 +314,15 @@ class Manifest(BaseModel):
             from .instrumentation import validate_instrumentation
 
             validate_instrumentation(self.instrumentation, self.topology)
+
+        if self.observability_contract is not None:
+            from .instrumentation import validate_observability_contract
+
+            validate_observability_contract(
+                self.observability_contract,
+                self.instrumentation,
+                self.topology,
+            )
 
         if self.detection is not None:
             from .detection import validate_detection
@@ -411,6 +421,7 @@ class Manifest(BaseModel):
 from .attack import Attack  # noqa: E402
 from .detection import Detection  # noqa: E402
 from .instrumentation import Instrumentation  # noqa: E402
+from .instrumentation import ObservabilityContract  # noqa: E402
 from .structuring import Structuring  # noqa: E402
 from .visualization import Visualization  # noqa: E402
 

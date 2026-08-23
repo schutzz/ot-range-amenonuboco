@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # topology.py が本モジュールを(Manifest.instrumentationフィールドの型として)
 # importするため、ここでtopology.pyをトップレベルでimportすると循環importになる。
@@ -40,6 +40,23 @@ class Instrumentation(BaseModel):
         return [s for s in topology.segments if s.name not in skip]
 
 
+class ObservabilityContract(BaseModel):
+    """利用者が観測可能であることを要求するセグメントの汎用宣言。
+
+    セグメント名が実在するか、または実際に観測対象に含まれるかという
+    トポロジとの関係は、Manifestのクロスレイヤー検証で扱う。このモデルは
+    その要求をプロトコル・検知器・シナリオに依存せず表現する責務だけを持つ。
+    """
+
+    required_segments: list[str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _validate_unique_required_segments(self) -> "ObservabilityContract":
+        if len(self.required_segments) != len(set(self.required_segments)):
+            raise ValueError("observability_contract.required_segments must be unique")
+        return self
+
+
 def validate_instrumentation(instrumentation: Instrumentation, topology: Topology) -> None:
     """Manifest側の相互参照バリデーションから呼ばれる(Instrumentation単体では
     topologyを知らないため、クロスバリデーションはManifestモデル側で行う)。
@@ -58,3 +75,32 @@ def validate_instrumentation(instrumentation: Instrumentation, topology: Topolog
             f"instrumentation.exclude references undefined segment(s): "
             f"{sorted(unknown_excludes)}"
         )
+
+
+def validate_observability_contract(
+    contract: ObservabilityContract,
+    instrumentation: Instrumentation | None,
+    topology: Topology,
+) -> None:
+    """観測要求が宣言済みトポロジと計装状態に一致するか検証する。"""
+    if instrumentation is None:
+        raise ValueError(
+            "observability_contract requires instrumentation to compute observed segments"
+        )
+
+    segment_names = {segment.name for segment in topology.segments}
+    observed_segment_names = {
+        segment.name for segment in instrumentation.observed_segments(topology)
+    }
+
+    for required_segment in contract.required_segments:
+        if required_segment not in segment_names:
+            raise ValueError(
+                "observability_contract.required_segments references undefined "
+                f"segment '{required_segment}'"
+            )
+        if required_segment not in observed_segment_names:
+            raise ValueError(
+                "observability_contract.required_segments requires segment "
+                f"'{required_segment}', but it is not in the computed observed-segment set"
+            )
