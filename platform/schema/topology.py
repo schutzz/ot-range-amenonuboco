@@ -315,6 +315,15 @@ class Manifest(BaseModel):
 
             validate_instrumentation(self.instrumentation, self.topology)
 
+        if self.observability_contract is not None:
+            from .instrumentation import validate_observability_contract
+
+            validate_observability_contract(
+                self.observability_contract,
+                self.instrumentation,
+                self.topology,
+            )
+
         if self.detection is not None:
             from .detection import validate_detection
 

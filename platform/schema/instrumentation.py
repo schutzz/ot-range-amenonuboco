@@ -75,3 +75,32 @@ def validate_instrumentation(instrumentation: Instrumentation, topology: Topolog
             f"instrumentation.exclude references undefined segment(s): "
             f"{sorted(unknown_excludes)}"
         )
+
+
+def validate_observability_contract(
+    contract: ObservabilityContract,
+    instrumentation: Instrumentation | None,
+    topology: Topology,
+) -> None:
+    """観測要求が宣言済みトポロジと計装状態に一致するか検証する。"""
+    if instrumentation is None:
+        raise ValueError(
+            "observability_contract requires instrumentation to compute observed segments"
+        )
+
+    segment_names = {segment.name for segment in topology.segments}
+    observed_segment_names = {
+        segment.name for segment in instrumentation.observed_segments(topology)
+    }
+
+    for required_segment in contract.required_segments:
+        if required_segment not in segment_names:
+            raise ValueError(
+                "observability_contract.required_segments references undefined "
+                f"segment '{required_segment}'"
+            )
+        if required_segment not in observed_segment_names:
+            raise ValueError(
+                "observability_contract.required_segments requires segment "
+                f"'{required_segment}', but it is not in the computed observed-segment set"
+            )

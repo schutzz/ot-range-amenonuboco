@@ -47,6 +47,19 @@ def cmd_provision(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_validate(args: argparse.Namespace) -> int:
+    """マニフェストを読み込み、provisioningを行わずに検証する。"""
+    manifest_path = Path(args.manifest)
+    try:
+        load_manifest(manifest_path)
+    except ManifestLoadError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"valid: {manifest_path}")
+    return 0
+
+
 def cmd_diagram(args: argparse.Namespace) -> int:
     manifest_path = Path(args.manifest)
     output_path = Path(args.output) if args.output else manifest_path.with_name(
@@ -123,6 +136,12 @@ def main() -> int:
         "-o", "--output", help="出力先パス(既定: <manifest>.docker-compose.yml)"
     )
     p_provision.set_defaults(func=cmd_provision)
+
+    p_validate = sub.add_parser(
+        "validate", help="マニフェストをprovisioning前に検証する"
+    )
+    p_validate.add_argument("manifest", help="検証するマニフェストファイルのパス")
+    p_validate.set_defaults(func=cmd_validate)
 
     p_diagram = sub.add_parser(
         "diagram", help="マニフェストからHTMLネットワーク図を生成する"
