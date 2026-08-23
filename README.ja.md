@@ -8,7 +8,7 @@
 
 `power-grid-reference.yaml`のような単一マニフェストから、Docker Composeトポロジ、トラフィックミラーリング、tsharkによる構造化パイプラインを生成します。この考え方を **Cyber Range as Code (CRaC)** と呼びます。英語版READMEが正本です。
 
-**現在のリリース:** [`v0.13.0`](./releases/tag/v0.13.0) では Generic Observability Contract を追加し、マニフェスト側で「必ず観測可能であるべきセグメント」を宣言し、矛盾があればプロビジョニング前の `validate` で拒否できるようになりました。Phase 12は公開性能証跡のアーカイブ済みマイルストーンとして残しています。全履歴は[Release Notes](./docs/releases/README.md)を参照してください。
+**現在のリリース:** [`v0.13.0`](https://github.com/schutzz/ot-range-amenonuboco/releases/tag/v0.13.0) では Generic Observability Contract を追加し、マニフェスト側で「必ず観測可能であるべきセグメント」を宣言し、矛盾があればプロビジョニング前の `validate` で拒否できるようになりました。Phase 12は公開性能証跡のアーカイブ済みマイルストーンとして残しています。全履歴は[Release Notes](./docs/releases/README.md)を参照してください。
 
 ## 目的と最短起動
 
