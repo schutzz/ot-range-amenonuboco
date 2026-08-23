@@ -8,6 +8,8 @@
 
 `power-grid-reference.yaml`のような単一マニフェストから、Docker Composeトポロジ、トラフィックミラーリング、tsharkによる構造化パイプラインを生成します。この考え方を **Cyber Range as Code (CRaC)** と呼びます。英語版READMEが正本です。
 
+**現在のリリース:** [`v0.13.0`](https://github.com/schutzz/ot-range-amenonuboco/releases/tag/v0.13.0) では Generic Observability Contract を追加し、マニフェスト側で「必ず観測可能であるべきセグメント」を宣言し、矛盾があればプロビジョニング前の `validate` で拒否できるようになりました。Phase 12は公開性能証跡のアーカイブ済みマイルストーンとして残しています。全履歴は[Release Notes](./docs/releases/README.md)を参照してください。
+
 ## 目的と最短起動
 
 OT/ICS演習で繰り返すトポロジ、ミラーリング、sidecar、データ取り込み、シナリオ配線を、再利用可能な宣言的マニフェストにします。検知ロジックと評価は各シナリオ資産の責務です。
@@ -54,6 +56,8 @@ Compose起動前に無関係なコンテナ・ネットワークを停止して�
 
 インストール不要の[ブラウザ版エディタ](https://schutzz.github.io/ot-range-amenonuboco/)はCIDR外IP、重複IP、ゲートウェイロールを検証し、トポロジとYAMLを生成します。[エディタガイド](./docs/gui-guide.md)を参照してください。
 
+- **プロビジョニング前検証**：`python platform/cli.py validate <manifest>` で、レンジを生成・起動せずにschemaとcross-layer constraintを検証
+- **Generic Observability Contract**：任意の `observability_contract.required_segments` で、未定義・除外済み・その他観測対象外となる必須セグメントをプロビジョニング前に拒否。詳細は[マニフェストスキーマ §3.1](./docs/manifest-schema-guide.md#31-可観測性契約observability_contract任意)
 - tsharkを既定の構造化層とし、Wireshark dissectorを活用
 - 検知ロジックをシナリオ資産へ分離
 - Spicy/Zeekを高負荷・特殊payload・状態的検知向けの任意プラグインとして利用
