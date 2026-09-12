@@ -219,7 +219,11 @@ topology:
       networks:
         - { segment: mirror_link }
       overrides:
-        command: "apt-get update -qq && apt-get install -y -qq tcpdump >/dev/null 2>&1 && tcpdump -i eth0 -nn"
+        # K8: live Debian bullseye-security の Release metadataが期限切れになり
+        # apt-get updateが失敗する事象が発生したため、runtime aptはDebian公式の
+        # 固定snapshotへ向け、Acquire::Check-Valid-Until=falseでsnapshot自体の
+        # Valid-Until切れも無視する。
+        command: 'printf "%s\n" "deb http://snapshot.debian.org/archive/debian/20260824T000000Z bullseye main" "deb http://snapshot.debian.org/archive/debian-security/20260824T000000Z bullseye-security main" "deb http://snapshot.debian.org/archive/debian/20260824T000000Z bullseye-updates main" > /etc/apt/sources.list && apt-get update -qq -o Acquire::Check-Valid-Until=false && apt-get install -y -qq tcpdump >/dev/null 2>&1 && tcpdump -i eth0 -nn'
 
     - name: log_structurer
       # Phase3: 構造化パイプライン(tshark+バルクローダー)実行ノード。

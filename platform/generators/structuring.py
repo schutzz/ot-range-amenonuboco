@@ -36,7 +36,17 @@ BULK_LOADER_HOST_PATH = (Path(__file__).resolve().parent / "assets" / "bulk_load
 # のapt/apk自動判定はiproute2向けであり、tsharkのAlpine版パッケージ有無・
 # 挙動差は未検証のため、既知の制約として明記する)。
 _INSTALL_STRUCTURING_DEPS = (
-    "DEBIAN_FRONTEND=noninteractive apt-get update -qq && "
+    # K8: live Debian bullseye-security の Release metadataが期限切れになり
+    # apt-get updateが失敗する事象が発生したため、runtime aptはDebian公式の
+    # 固定snapshotへ向け、Acquire::Check-Valid-Until=falseでsnapshot自体の
+    # Valid-Until切れも無視する。
+    "printf '%s\\n' "
+    "'deb http://snapshot.debian.org/archive/debian/20260824T000000Z bullseye main' "
+    "'deb http://snapshot.debian.org/archive/debian-security/20260824T000000Z bullseye-security main' "
+    "'deb http://snapshot.debian.org/archive/debian/20260824T000000Z bullseye-updates main' "
+    "> /etc/apt/sources.list && "
+    "DEBIAN_FRONTEND=noninteractive apt-get update -qq "
+    "-o Acquire::Check-Valid-Until=false && "
     "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tshark python3 "
     ">/dev/null 2>&1"
 )

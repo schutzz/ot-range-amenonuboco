@@ -126,7 +126,17 @@ def _routing_commands(topology: Topology, asset: Asset) -> list[str]:
 # 起動が速くなり、パッケージ配信が不調でもレンジが立ち上がる。
 _INSTALL_IPROUTE2 = (
     "(command -v ip >/dev/null 2>&1) || "
-    "(command -v apt-get >/dev/null 2>&1 && apt-get update -qq && "
+    "(command -v apt-get >/dev/null 2>&1 && "
+    # K8: live Debian bullseye-security の Release metadata が期限切れになり
+    # apt-get updateが失敗する事象が発生したため、runtime aptはDebian公式の
+    # 固定snapshotへ向け、Acquire::Check-Valid-Until=falseでsnapshot自体の
+    # Valid-Until切れも無視する。
+    "printf '%s\\n' "
+    "'deb http://snapshot.debian.org/archive/debian/20260824T000000Z bullseye main' "
+    "'deb http://snapshot.debian.org/archive/debian-security/20260824T000000Z bullseye-security main' "
+    "'deb http://snapshot.debian.org/archive/debian/20260824T000000Z bullseye-updates main' "
+    "> /etc/apt/sources.list && "
+    "apt-get update -qq -o Acquire::Check-Valid-Until=false && "
     "apt-get install -y -qq iproute2 >/dev/null 2>&1) || "
     "(command -v apk >/dev/null 2>&1 && apk add --no-cache -q iproute2 >/dev/null 2>&1)"
 )
