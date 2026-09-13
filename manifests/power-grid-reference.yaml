@@ -223,7 +223,28 @@ topology:
         # apt-get updateが失敗する事象が発生したため、runtime aptはDebian公式の
         # 固定snapshotへ向け、Acquire::Check-Valid-Until=falseでsnapshot自体の
         # Valid-Until切れも無視する。
-        command: 'printf "%s\n" "deb http://snapshot.debian.org/archive/debian/20260824T000000Z bullseye main" "deb http://snapshot.debian.org/archive/debian-security/20260824T000000Z bullseye-security main" "deb http://snapshot.debian.org/archive/debian/20260824T000000Z bullseye-updates main" > /etc/apt/sources.list && apt-get update -qq -o Acquire::Check-Valid-Until=false && apt-get install -y -qq tcpdump >/dev/null 2>&1 && tcpdump -i eth0 -nn'
+        #
+        # K8-S2: この行は元々 printf の引数をダブルクォートで囲んでいたが、
+        # platform/generators/compose.py の `sh -c "{escaped}"` は組み立てた
+        # command全体をダブルクォートで包むだけで、中身のダブルクォートを
+        # エスケープしない(汎用generator自体はこの修正の対象外)。結果、
+        # printf引数のダブルクォートが外側のsh -cクォートを破壊し、
+        # snapshot行が独立したシェルコマンドとして解釈され
+        # `deb: not found` (exit 127) の再起動ループを起こしていた
+        # (tap_observer, RestartCount=29で確認)。ここではlog_structurer側
+        # (platform/generators/structuring.py)と同じく、printfの引数を
+        # シェルのシングルクォートに変更し、YAML側もブロックスカラーにして
+        # クォート衝突を避ける。URL・オプション・パッケージ・tcpdumpの
+        # インターフェース/挙動はすべて変更前と同一。
+        command: >-
+          printf '%s\n'
+          'deb http://snapshot.debian.org/archive/debian/20260824T000000Z bullseye main'
+          'deb http://snapshot.debian.org/archive/debian-security/20260824T000000Z bullseye-security main'
+          'deb http://snapshot.debian.org/archive/debian/20260824T000000Z bullseye-updates main'
+          > /etc/apt/sources.list &&
+          apt-get update -qq -o Acquire::Check-Valid-Until=false &&
+          apt-get install -y -qq tcpdump >/dev/null 2>&1 &&
+          tcpdump -i eth0 -nn
 
     - name: log_structurer
       # Phase3: 構造化パイプライン(tshark+バルクローダー)実行ノード。
