@@ -1,0 +1,86 @@
+name: Publish network-tools images
+
+# K8-3 k8-repro-20260916-001 root-cause remediation: publishes the
+# protocol-images/network-tools* images (baked iproute2/tcpdump/tshark,
+# no runtime apt-get) to GHCR so formal K8 reproduction can pull an
+# exact, platform-specific, digest-pinned image instead of relying on a
+# live external APT repository at container-start time.
+#
+# Bound to Amenonuboco's own version tag scheme (not a separate
+# network-tools-vN namespace) so provenance stays simple: image tag
+# `vX.Y.Z` always corresponds to the source tree at that exact release.
+#
+# Triggered only on pushing a version tag -- never on pull_request, so an
+# untrusted PR cannot cause a publish.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image:
+          - name: network-tools
+            context: protocol-images/network-tools
+          - name: network-tools-structurer
+            context: protocol-images/network-tools-structurer
+    steps:
+      - name: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: setup-buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: GHCR login
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: build (amd64, load for smoke test)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.image.context }}
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: local/${{ matrix.image.name }}:smoke
+
+      - name: smoke test — required binaries present, no leftover apt state assumed
+        run: |
+          set -eu
+          case "${{ matrix.image.name }}" in
+            network-tools)
+              docker run --rm local/network-tools:smoke sh -c \
+                'command -v ip && command -v tc && command -v tcpdump && ip -V && tc -V'
+              ;;
+            network-tools-structurer)
+              docker run --rm local/network-tools-structurer:smoke sh -c \
+                'command -v ip && command -v tc && command -v tshark && command -v python3 && tshark -v'
+              ;;
+          esac
+
+      - name: build + push (amd64)
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.image.context }}
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/schutzz/amenonuboco-${{ matrix.image.name }}:${{ github.ref_name }}
+
+      - name: report digest
+        run: |
+          echo "### ${{ matrix.image.name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- tag: \`${{ github.ref_name }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- platform-specific (linux/amd64) digest: \`${{ steps.push.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- pull reference: \`ghcr.io/schutzz/amenonuboco-${{ matrix.image.name }}@${{ steps.push.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
