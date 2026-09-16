@@ -38,9 +38,9 @@ FROM debian:bullseye-slim@sha256:70509c95d1857a3704c0a5d92ee2e0adac95f612a938688
 # `[check-valid-until=no]`はsnapshotのRelease fileが持つ`Valid-Until`
 # (発行から一定期間で「期限切れ」表示になる)を無視するために必要——
 # 期限切れそのものはsnapshotの中身が壊れたことを意味しない。
-RUN echo "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20260831T022607Z bullseye main" > /etc/apt/sources.list \
-    && echo "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/20260831T070239Z bullseye-security main" >> /etc/apt/sources.list \
-    && echo "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20260831T022607Z bullseye-updates main" >> /etc/apt/sources.list
+RUN echo "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260831T022607Z bullseye main" > /etc/apt/sources.list \
+    && echo "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20260831T070239Z bullseye-security main" >> /etc/apt/sources.list \
+    && echo "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260831T022607Z bullseye-updates main" >> /etc/apt/sources.list
 
 # iproute2: wan_router/tap_observerともに`ip`/`tc`によるrouting・mirroring
 # 設定を必要とする。

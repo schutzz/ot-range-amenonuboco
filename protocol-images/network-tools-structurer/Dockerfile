@@ -23,9 +23,9 @@ FROM debian:bullseye-slim@sha256:70509c95d1857a3704c0a5d92ee2e0adac95f612a938688
 # protocol-images/network-tools/Dockerfileと同じ理由(実際にrolling
 # mirrorへのapt-get installがtransitive dependencyの404で失敗することを
 # CIで確認済み)。詳細はそちらのDockerfileコメント参照。
-RUN echo "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20260831T022607Z bullseye main" > /etc/apt/sources.list \
-    && echo "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/20260831T070239Z bullseye-security main" >> /etc/apt/sources.list \
-    && echo "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20260831T022607Z bullseye-updates main" >> /etc/apt/sources.list
+RUN echo "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260831T022607Z bullseye main" > /etc/apt/sources.list \
+    && echo "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20260831T070239Z bullseye-security main" >> /etc/apt/sources.list \
+    && echo "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20260831T022607Z bullseye-updates main" >> /etc/apt/sources.list
 
 # tsharkの非対話インストールは「非rootユーザーへcapture権限を与えるか」を
 # 尋ねるprompt を持つため、DEBIAN_FRONTEND=noninteractiveが無いと
