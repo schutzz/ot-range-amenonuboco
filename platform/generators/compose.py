@@ -360,6 +360,10 @@ _BAKED_DEPENDENCY_BUILD_CONTEXTS = frozenset(
     {
         "../protocol-images/network-tools",
         "../protocol-images/network-tools-structurer",
+        "../protocol-images/dnp3",
+        "../protocol-images/opcua",
+        "../protocol-images/power-grid-python-tools",
+        "../protocol-images/power-grid-nodered-tools",
     }
 )
 

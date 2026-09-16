@@ -210,13 +210,12 @@ def test_no_image_overrides_reproduces_existing_behavior_exactly(reference_manif
     assert explicit_none == implicit_default
 
 
-def test_power_grid_network_tools_assets_use_baked_dependency_build_contexts(
+def test_power_grid_strict_path_has_no_runtime_package_manager(
     presets, repo_root
 ):
-    """power-grid-reference.yamlのwan_router/tap_observer/log_structurerが
-    protocol-images/network-tools*を参照し、それぞれのcommandが
-    apt-get/apkを一切含まないこと(K8 Range A/B strict reproduction pathに
-    runtime package-manager invocationが残っていないことの受入条件)。"""
+    """power-grid-reference.yamlの全service commandにruntime package-manager
+    invocationが残っていないこと。K8 Range A/B strict reproduction pathの
+    受入条件は特定3serviceだけでなく生成compose全体に適用する。"""
     from schema import load_manifest
 
     manifest = load_manifest(repo_root / "manifests" / "power-grid-reference.yaml")
@@ -227,13 +226,27 @@ def test_power_grid_network_tools_assets_use_baked_dependency_build_contexts(
     assert assets["tap_observer"].image == "../protocol-images/network-tools"
     assert assets["log_structurer"].image == "../protocol-images/network-tools-structurer"
 
-    for name in ("wan_router", "tap_observer", "log_structurer"):
+    expected_baked = {
+        "wan_router": "../protocol-images/network-tools",
+        "tap_observer": "../protocol-images/network-tools",
+        "log_structurer": "../protocol-images/network-tools-structurer",
+        "cc_scada_master": "../protocol-images/dnp3",
+        "sub_c_rtu": "../protocol-images/dnp3",
+        "sub_b_process_points": "../protocol-images/opcua",
+        "historian": "../protocol-images/opcua",
+        "sub_b_rtu_hmi": "../protocol-images/power-grid-nodered-tools",
+        "sub_c_hmi": "../protocol-images/power-grid-nodered-tools",
+        "sub_a_ied_02": "../protocol-images/power-grid-python-tools",
+        "ups_attacker": "../protocol-images/power-grid-python-tools",
+        "sub_d_ied_01": "../protocol-images/power-grid-python-tools",
+        "cc_ups": "../protocol-images/power-grid-python-tools",
+    }
+    for name, context in expected_baked.items():
         svc = compose["services"][name]
-        assert svc.get("build") in (
-            "../protocol-images/network-tools",
-            "../protocol-images/network-tools-structurer",
-        )
+        assert assets[name].image == context
+        assert svc.get("build") == context
         assert "image" not in svc
-        cmd = svc.get("command", "")
+    for name, svc in compose["services"].items():
+        cmd = svc.get("command", "") or ""
         assert "apt-get" not in cmd, f"{name}: unexpected apt-get in command"
         assert "apk add" not in cmd, f"{name}: unexpected apk add in command"

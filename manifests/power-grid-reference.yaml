@@ -92,7 +92,7 @@ topology:
       # Alpine系イメージ(apk)。ルーティング生成のapk経路を検証する対象でもある
       # (Phase1決定事項#21)。
       role: ot-asset
-      image: nodered/node-red:3.1.0
+      image: ../protocol-images/power-grid-nodered-tools
       networks:
         - { segment: sub_b_lan, ip: 10.1.30.10 }
       overrides:
@@ -117,7 +117,7 @@ topology:
     - name: sub_a_ied_02
       # 同上、攻撃スクリプト(send_goose_poison.py)の再現もPhase 1のスコープ外。
       role: attacker-insider
-      image: python:3.10-slim
+      image: ../protocol-images/power-grid-python-tools
       networks:
         - { segment: sub_a_l2_lan, ip: 10.1.20.11 }
       overrides:
@@ -145,7 +145,7 @@ topology:
       # 変電所Cの監視員向けHMI。sub_b_rtu_hmiと同型(Node-RED)。1変電所内に
       # 複数資産を持たせることで、水道・製造業ドラフトの濃さと揃える。
       role: ot-asset
-      image: nodered/node-red:3.1.0
+      image: ../protocol-images/power-grid-nodered-tools
       networks:
         - { segment: sub_c_lan, ip: 10.1.40.11 }
       overrides:
@@ -157,12 +157,12 @@ topology:
       # 模す。2022年CISA/FBI/DOE注意喚起の「インターネットに露出したUPS管理
       # インターフェース」を再現するため、wan_link(外部境界相当)に配置する。
       role: attacker-external
-      image: python:3.10-slim
+      image: ../protocol-images/power-grid-python-tools
       networks:
         - { segment: wan_link, ip: 172.18.0.50 }
       overrides:
         command: |
-          apt-get update -qq && apt-get install -y -qq snmp >/dev/null 2>&1 &&
+          (command -v snmpset >/dev/null 2>&1 || { echo 'FATAL: required binary snmpset missing from image' >&2; exit 1; }) &&
           ( for i in 1 2 3 4 5 6; do
               sleep 15
               snmpset -v2c -c public -t 5 -r 2 10.1.10.95:161 1.3.6.1.2.1.1.6.0 s 'UNAUTHORIZED_SHUTDOWN_COMMAND_INJECTED' 2>&1
@@ -178,7 +178,7 @@ topology:
       # ot-ids-verumのgoose_spicy_sidecar.py資産を手動配線する方式を
       # 暫定的に採る(決定事項#107、詳細はPhase7-InfraExpansion.md参照)。
       role: ot-asset
-      image: python:3.10-slim
+      image: ../protocol-images/power-grid-python-tools
       networks:
         - { segment: sub_d_l2_lan, ip: 10.1.50.11 }
       overrides:
@@ -341,12 +341,12 @@ topology:
       # ことが判明したため、書き込み成否に依存しないアクセス検知へ設計変更した
       # (決定事項#109)。
       role: ot-asset
-      image: python:3.10-slim
+      image: ../protocol-images/power-grid-python-tools
       networks:
         - { segment: cc_lan, ip: 10.1.10.95 }
       overrides:
         command: |
-          apt-get update -qq && apt-get install -y -qq snmpd snmp >/dev/null 2>&1 &&
+          (command -v snmpd >/dev/null 2>&1 && command -v snmpset >/dev/null 2>&1 || { echo 'FATAL: required SNMP binaries missing from image' >&2; exit 1; }) &&
           printf 'rwcommunity public\nsysLocation Central Control Room UPS (normal)\n' > /etc/snmp/snmpd.conf &&
           ( snmpd -f -Lf /var/log/snmpd.log &
             sleep 3

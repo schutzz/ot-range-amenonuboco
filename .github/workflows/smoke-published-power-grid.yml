@@ -1,0 +1,109 @@
+name: Smoke published power-grid images
+
+on:
+  workflow_dispatch:
+    inputs:
+      network_tools:
+        description: linux/amd64 manifest digest for amenonuboco-network-tools
+        required: true
+        type: string
+      network_tools_structurer:
+        description: linux/amd64 manifest digest for amenonuboco-network-tools-structurer
+        required: true
+        type: string
+      dnp3:
+        description: linux/amd64 manifest digest for amenonuboco-dnp3
+        required: true
+        type: string
+      opcua:
+        description: linux/amd64 manifest digest for amenonuboco-opcua
+        required: true
+        type: string
+      power_grid_python_tools:
+        description: linux/amd64 manifest digest for amenonuboco-power-grid-python-tools
+        required: true
+        type: string
+      power_grid_nodered_tools:
+        description: linux/amd64 manifest digest for amenonuboco-power-grid-nodered-tools
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: generate digest-pinned Range A compose
+        shell: bash
+        run: |
+          set -euo pipefail
+          for value in \
+            '${{ inputs.network_tools }}' \
+            '${{ inputs.network_tools_structurer }}' \
+            '${{ inputs.dnp3 }}' \
+            '${{ inputs.opcua }}' \
+            '${{ inputs.power_grid_python_tools }}' \
+            '${{ inputs.power_grid_nodered_tools }}'; do
+            case "$value" in sha256:[0-9a-f][0-9a-f]*) ;; *) echo "invalid digest: $value" >&2; exit 1;; esac
+            test "${#value}" -eq 71
+          done
+          python platform/cli.py provision manifests/power-grid-reference.yaml \
+            -o manifests/k8-published-smoke.docker-compose.yml \
+            --image-override "wan_router=ghcr.io/schutzz/amenonuboco-network-tools@${{ inputs.network_tools }}" \
+            --image-override "tap_observer=ghcr.io/schutzz/amenonuboco-network-tools@${{ inputs.network_tools }}" \
+            --image-override "log_structurer=ghcr.io/schutzz/amenonuboco-network-tools-structurer@${{ inputs.network_tools_structurer }}" \
+            --image-override "cc_scada_master=ghcr.io/schutzz/amenonuboco-dnp3@${{ inputs.dnp3 }}" \
+            --image-override "sub_c_rtu=ghcr.io/schutzz/amenonuboco-dnp3@${{ inputs.dnp3 }}" \
+            --image-override "sub_b_process_points=ghcr.io/schutzz/amenonuboco-opcua@${{ inputs.opcua }}" \
+            --image-override "historian=ghcr.io/schutzz/amenonuboco-opcua@${{ inputs.opcua }}" \
+            --image-override "sub_b_rtu_hmi=ghcr.io/schutzz/amenonuboco-power-grid-nodered-tools@${{ inputs.power_grid_nodered_tools }}" \
+            --image-override "sub_c_hmi=ghcr.io/schutzz/amenonuboco-power-grid-nodered-tools@${{ inputs.power_grid_nodered_tools }}" \
+            --image-override "sub_a_ied_02=ghcr.io/schutzz/amenonuboco-power-grid-python-tools@${{ inputs.power_grid_python_tools }}" \
+            --image-override "ups_attacker=ghcr.io/schutzz/amenonuboco-power-grid-python-tools@${{ inputs.power_grid_python_tools }}" \
+            --image-override "sub_d_ied_01=ghcr.io/schutzz/amenonuboco-power-grid-python-tools@${{ inputs.power_grid_python_tools }}" \
+            --image-override "cc_ups=ghcr.io/schutzz/amenonuboco-power-grid-python-tools@${{ inputs.power_grid_python_tools }}"
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+          compose = yaml.safe_load(Path('manifests/k8-published-smoke.docker-compose.yml').read_text(encoding='utf-8'))
+          bad = [name for name, svc in compose['services'].items()
+                 if 'apt-get' in (svc.get('command') or '') or 'apk add' in (svc.get('command') or '')]
+          if bad:
+              raise SystemExit('runtime package-manager command remains in: ' + ', '.join(bad))
+          expected = {'wan_router', 'tap_observer', 'log_structurer', 'cc_scada_master', 'sub_c_rtu',
+                      'sub_b_process_points', 'historian', 'sub_b_rtu_hmi', 'sub_c_hmi',
+                      'sub_a_ied_02', 'ups_attacker', 'sub_d_ied_01', 'cc_ups'}
+          not_pinned = [name for name in expected if '@sha256:' not in compose['services'][name].get('image', '')]
+          if not_pinned:
+              raise SystemExit('service is not digest-pinned: ' + ', '.join(not_pinned))
+          PY
+
+      - name: targeted startup and gateway/mirroring smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=manifests/k8-published-smoke.docker-compose.yml
+          project=amenonuboco-published-smoke
+          trap 'docker compose -p "$project" -f "$file" down -v --remove-orphans' EXIT
+          docker compose -p "$project" -f "$file" up -d --no-build wan_router tap_observer log_structurer
+          sleep 30
+          docker compose -p "$project" -f "$file" ps
+          router=$(docker compose -p "$project" -f "$file" ps -q wan_router)
+          test -n "$router"
+          docker exec "$router" sh -lc 'command -v ip; command -v tc; ip -br addr'
+          gateway_if=$(docker exec "$router" sh -lc "ip -o -4 addr show | awk '/10.1.20.254\\/24/ {print \\$2}' | head -n 1")
+          test -n "$gateway_if"
+          docker exec "$router" tc qdisc show dev "$gateway_if"
+          docker exec "$router" tc filter show dev "$gateway_if" parent ffff:
+          for service in wan_router tap_observer log_structurer; do
+            cid=$(docker compose -p "$project" -f "$file" ps -q "$service")
+            test -n "$cid"
+            test "$(docker inspect -f '{{.State.Running}}' "$cid")" = true
+            test "$(docker inspect -f '{{.RestartCount}}' "$cid")" = 0
+          done
