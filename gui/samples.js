@@ -98,7 +98,7 @@ window.AMENONUBOCO_SAMPLES = [
             "role": "ot-asset"
           },
           {
-            "image": "nodered/node-red:3.1.0",
+            "image": "../protocol-images/power-grid-nodered-tools",
             "name": "sub_b_rtu_hmi",
             "networks": [
               {
@@ -139,7 +139,7 @@ window.AMENONUBOCO_SAMPLES = [
             "role": "ot-asset"
           },
           {
-            "image": "python:3.10-slim",
+            "image": "../protocol-images/power-grid-python-tools",
             "name": "sub_a_ied_02",
             "networks": [
               {
@@ -180,7 +180,7 @@ window.AMENONUBOCO_SAMPLES = [
             "role": "ot-asset"
           },
           {
-            "image": "nodered/node-red:3.1.0",
+            "image": "../protocol-images/power-grid-nodered-tools",
             "name": "sub_c_hmi",
             "networks": [
               {
@@ -200,7 +200,7 @@ window.AMENONUBOCO_SAMPLES = [
             "role": "ot-asset"
           },
           {
-            "image": "python:3.10-slim",
+            "image": "../protocol-images/power-grid-python-tools",
             "name": "ups_attacker",
             "networks": [
               {
@@ -210,7 +210,7 @@ window.AMENONUBOCO_SAMPLES = [
             ],
             "overrides": {
               "cap_add": null,
-              "command": "apt-get update -qq && apt-get install -y -qq snmp >/dev/null 2>&1 &&\n( for i in 1 2 3 4 5 6; do\n    sleep 15\n    snmpset -v2c -c public -t 5 -r 2 10.1.10.95:161 1.3.6.1.2.1.1.6.0 s 'UNAUTHORIZED_SHUTDOWN_COMMAND_INJECTED' 2>&1\n  done\n  wait\n)\n",
+              "command": "(command -v snmpset >/dev/null 2>&1 || { echo 'FATAL: required binary snmpset missing from image' >&2; exit 1; }) &&\n( for i in 1 2 3 4 5 6; do\n    sleep 15\n    snmpset -v2c -c public -t 5 -r 2 10.1.10.95:161 1.3.6.1.2.1.1.6.0 s 'UNAUTHORIZED_SHUTDOWN_COMMAND_INJECTED' 2>&1\n  done\n  wait\n)\n",
               "environment": [],
               "ports": [],
               "sysctls": null
@@ -218,7 +218,7 @@ window.AMENONUBOCO_SAMPLES = [
             "role": "attacker-external"
           },
           {
-            "image": "python:3.10-slim",
+            "image": "../protocol-images/power-grid-python-tools",
             "name": "sub_d_ied_01",
             "networks": [
               {
@@ -447,7 +447,7 @@ window.AMENONUBOCO_SAMPLES = [
             "role": "ot-asset"
           },
           {
-            "image": "python:3.10-slim",
+            "image": "../protocol-images/power-grid-python-tools",
             "name": "cc_ups",
             "networks": [
               {
@@ -457,7 +457,7 @@ window.AMENONUBOCO_SAMPLES = [
             ],
             "overrides": {
               "cap_add": null,
-              "command": "apt-get update -qq && apt-get install -y -qq snmpd snmp >/dev/null 2>&1 &&\nprintf 'rwcommunity public\\nsysLocation Central Control Room UPS (normal)\\n' > /etc/snmp/snmpd.conf &&\n( snmpd -f -Lf /var/log/snmpd.log &\n  sleep 3\n  tail -F /var/log/snmpd.log | while read LINE; do\n    case $LINE in\n      *'Connection from UDP'*127.0.0.1*127.0.0.1*) : ;;\n      *'Connection from UDP'*)\n        echo '[cc_ups] !!! UNAUTHORIZED SNMP ACCESS FROM NON-LOCAL SOURCE DETECTED -- SIMULATING UPS SHUTDOWN (AVAILABILITY LOSS) !!!' ;;\n    esac\n  done\n  wait\n)\n",
+              "command": "(command -v snmpd >/dev/null 2>&1 && command -v snmpset >/dev/null 2>&1 || { echo 'FATAL: required SNMP binaries missing from image' >&2; exit 1; }) &&\nprintf 'rwcommunity public\\nsysLocation Central Control Room UPS (normal)\\n' > /etc/snmp/snmpd.conf &&\n( snmpd -f -Lf /var/log/snmpd.log &\n  sleep 3\n  tail -F /var/log/snmpd.log | while read LINE; do\n    case $LINE in\n      *'Connection from UDP'*127.0.0.1*127.0.0.1*) : ;;\n      *'Connection from UDP'*)\n        echo '[cc_ups] !!! UNAUTHORIZED SNMP ACCESS FROM NON-LOCAL SOURCE DETECTED -- SIMULATING UPS SHUTDOWN (AVAILABILITY LOSS) !!!' ;;\n    esac\n  done\n  wait\n)\n",
               "environment": [],
               "ports": [],
               "sysctls": null

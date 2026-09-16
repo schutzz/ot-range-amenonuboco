@@ -2,6 +2,15 @@
 
 This page is the public, human-readable history of Amenonuboco. It summarizes every completed phase and links release tags to their scope. Detailed implementation history remains available in the [Git commit log](../../commits/main).
 
+## v0.13.5 — Runtime Dependency Closure for Digest-Pinned Ranges
+
+**Tag:** [`v0.13.5`](https://github.com/schutzz/ot-range-amenonuboco/tree/v0.13.5)
+**Released:** 2026-09-16
+
+Completes the K8-3 runtime provisioning remediation across the full power-grid reference path. Every service command generated from `manifests/power-grid-reference.yaml` now contains zero runtime `apt-get` or `apk add` invocations. Dependency-bearing services use build-time images with pinned platform-specific bases; the release workflow builds, checks, and publishes all six reusable images to GHCR. Formal consumers can replace every such local build with an exact `linux/amd64` manifest digest through the existing generic `--image-override NAME=REF` interface.
+
+The separately dispatched published-image smoke workflow generates the digest-pinned Range A Compose file, verifies the closed command set, starts `wan_router` / `tap_observer` / `log_structurer`, resolves the gateway interface by `10.1.20.254/24`, inspects routing and mirroring state, and requires zero restarts. It is an implementation smoke test, not a formal Study 01 K8-3 attempt.
+
 ## v0.13.0 — Generic Observability Contract
 
 **Tag:** [`v0.13.0`](https://github.com/schutzz/ot-range-amenonuboco/tree/v0.13.0)  

@@ -1,8 +1,8 @@
 name: Publish network-tools images
 
 # K8-3 k8-repro-20260916-001 root-cause remediation: publishes the
-# protocol-images/network-tools* images (baked iproute2/tcpdump/tshark,
-# no runtime apt-get) to GHCR so formal K8 reproduction can pull an
+# dependency-bearing power-grid images (baked iproute2/tcpdump/tshark/SNMP,
+# no runtime package manager) to GHCR so formal K8 reproduction can pull an
 # exact, platform-specific, digest-pinned image instead of relying on a
 # live external APT repository at container-start time.
 #
@@ -46,6 +46,14 @@ jobs:
             context: protocol-images/network-tools
           - name: network-tools-structurer
             context: protocol-images/network-tools-structurer
+          - name: dnp3
+            context: protocol-images/dnp3
+          - name: opcua
+            context: protocol-images/opcua
+          - name: power-grid-python-tools
+            context: protocol-images/power-grid-python-tools
+          - name: power-grid-nodered-tools
+            context: protocol-images/power-grid-nodered-tools
     steps:
       - name: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -81,6 +89,22 @@ jobs:
             network-tools-structurer)
               docker run --rm local/network-tools-structurer:smoke sh -c \
                 'command -v ip && command -v tc && command -v tshark && command -v python3 && tshark -v'
+              ;;
+            dnp3)
+              docker run --rm local/dnp3:smoke sh -c \
+                'command -v ip && command -v tc && command -v python3 && test -f /app/run.py'
+              ;;
+            opcua)
+              docker run --rm local/opcua:smoke sh -c \
+                'command -v ip && command -v tc && command -v python3 && python3 -c "import asyncua" && test -f /app/run.py'
+              ;;
+            power-grid-python-tools)
+              docker run --rm local/power-grid-python-tools:smoke sh -c \
+                'command -v ip && command -v tc && command -v snmpset && command -v snmpd && command -v python3'
+              ;;
+            power-grid-nodered-tools)
+              docker run --rm local/power-grid-nodered-tools:smoke sh -c \
+                'command -v ip && command -v tc && command -v node && test -x /usr/src/node-red/entrypoint.sh'
               ;;
           esac
 
