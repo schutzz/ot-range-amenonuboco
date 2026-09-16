@@ -103,7 +103,7 @@ jobs:
                 'command -v ip && command -v tc && command -v snmpset && command -v snmpd && command -v python3'
               ;;
             power-grid-nodered-tools)
-              docker run --rm local/power-grid-nodered-tools:smoke sh -c \
+              docker run --rm --entrypoint sh local/power-grid-nodered-tools:smoke -c \
                 'command -v ip && command -v tc && command -v node && test -x /usr/src/node-red/entrypoint.sh'
               ;;
           esac
