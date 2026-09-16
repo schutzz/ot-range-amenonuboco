@@ -132,3 +132,108 @@ def test_stress_manifest_uses_tcpreplay_for_scenario_c(presets, repo_root):
     replay = assets["sc_c_tcpreplay"]
     assert replay.image == "../protocol-images/tcpreplay"
     assert "TCREPLAY_PPS=${TCREPLAY_PPS:-5000}" in replay.overrides.environment
+
+
+# --- image_overrides / baked-dependency fail-closed guard -----------------
+# K8-3 k8-repro-20260916-001 root-cause post-mortemを受けた回帰テスト。
+# wan_router(iproute2)がruntime apt-get installに依存し、外部APT
+# repositoryのtransitive dependency欠落(404)により恒久restart-loopへ
+# 至ったことの修正——image_overridesが指定された資産、および
+# protocol-images/network-tools*を参照する資産は、runtime apt-get/apk
+# フォールバックを一切持たない fail-closed な起動コマンドを生成する。
+
+def test_image_override_replaces_build_with_pinned_image(reference_manifest, presets):
+    """--image-override相当のimage_overridesが、buildではなくpinned image
+    参照へ差し替えること。"""
+    compose = generate_compose(
+        reference_manifest,
+        presets,
+        image_overrides={"wan_router": "ghcr.io/schutzz/amenonuboco-network-tools@sha256:deadbeef"},
+    )
+    wan_router = compose["services"]["wan_router"]
+    assert wan_router["image"] == "ghcr.io/schutzz/amenonuboco-network-tools@sha256:deadbeef"
+    assert "build" not in wan_router
+
+
+def test_image_override_command_has_no_apt_or_apk(reference_manifest, presets):
+    """image_overrideされた資産のcommandには、apt-get/apkによるruntime
+    package installが一切含まれないこと(mutable external dependencyの
+    完全排除)。"""
+    compose = generate_compose(
+        reference_manifest,
+        presets,
+        image_overrides={"wan_router": "ghcr.io/schutzz/amenonuboco-network-tools@sha256:deadbeef"},
+    )
+    cmd = compose["services"]["wan_router"]["command"]
+    assert "apt-get" not in cmd
+    assert "apk add" not in cmd
+
+
+def test_image_override_command_fails_closed_when_binary_missing(reference_manifest, presets):
+    """image_overrideされた資産のcommandは、`ip`/`tc`が無い場合に
+    apt-getへフォールバックせず、明示的なFATALメッセージ付きでexit 1する
+    guardを持つこと。"""
+    compose = generate_compose(
+        reference_manifest,
+        presets,
+        image_overrides={"wan_router": "ghcr.io/schutzz/amenonuboco-network-tools@sha256:deadbeef"},
+    )
+    cmd = compose["services"]["wan_router"]["command"]
+    assert "FATAL" in cmd
+    assert "exit 1" in cmd
+    assert "command -v ip" in cmd
+    assert "command -v tc" in cmd
+
+
+def test_image_override_unrelated_assets_are_unaffected(reference_manifest, presets):
+    """image_overridesが1資産のみを対象にした場合、他資産のcommand/image
+    は完全に無変更のままであること。"""
+    baseline = generate_compose(reference_manifest, presets)
+    overridden = generate_compose(
+        reference_manifest,
+        presets,
+        image_overrides={"wan_router": "ghcr.io/schutzz/amenonuboco-network-tools@sha256:deadbeef"},
+    )
+    for name in baseline["services"]:
+        if name == "wan_router":
+            continue
+        assert overridden["services"][name] == baseline["services"][name], (
+            f"unrelated service '{name}' changed"
+        )
+
+
+def test_no_image_overrides_reproduces_existing_behavior_exactly(reference_manifest, presets):
+    """image_overrides無指定(None、または未指定)は、既存の生成結果と
+    完全に同一であること——通常利用者の既存behaviorを一切変えない。"""
+    explicit_none = generate_compose(reference_manifest, presets, image_overrides=None)
+    implicit_default = generate_compose(reference_manifest, presets)
+    assert explicit_none == implicit_default
+
+
+def test_power_grid_network_tools_assets_use_baked_dependency_build_contexts(
+    presets, repo_root
+):
+    """power-grid-reference.yamlのwan_router/tap_observer/log_structurerが
+    protocol-images/network-tools*を参照し、それぞれのcommandが
+    apt-get/apkを一切含まないこと(K8 Range A/B strict reproduction pathに
+    runtime package-manager invocationが残っていないことの受入条件)。"""
+    from schema import load_manifest
+
+    manifest = load_manifest(repo_root / "manifests" / "power-grid-reference.yaml")
+    compose = generate_compose(manifest, presets)
+
+    assets = {a.name: a for a in manifest.topology.assets}
+    assert assets["wan_router"].image == "../protocol-images/network-tools"
+    assert assets["tap_observer"].image == "../protocol-images/network-tools"
+    assert assets["log_structurer"].image == "../protocol-images/network-tools-structurer"
+
+    for name in ("wan_router", "tap_observer", "log_structurer"):
+        svc = compose["services"][name]
+        assert svc.get("build") in (
+            "../protocol-images/network-tools",
+            "../protocol-images/network-tools-structurer",
+        )
+        assert "image" not in svc
+        cmd = svc.get("command", "")
+        assert "apt-get" not in cmd, f"{name}: unexpected apt-get in command"
+        assert "apk add" not in cmd, f"{name}: unexpected apk add in command"

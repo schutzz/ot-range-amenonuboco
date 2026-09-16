@@ -41,17 +41,38 @@ _INSTALL_STRUCTURING_DEPS = (
     ">/dev/null 2>&1"
 )
 
+# _INSTALL_STRUCTURING_DEPS の fail-closed 版。build時にtshark/python3を
+# 同梱したimage(protocol-images/network-tools-structurer、または
+# image_overridesで差し替えられたpinned image)を使うstructurer資産に
+# のみ適用する。_INSTALL_STRUCTURING_DEPSと異なり`command -v`短絡を持たず
+# 無条件にapt-getしていた既存挙動そのものが、K8-3 k8-repro-20260916-001
+# root-cause post-mortemで指摘された「iproute2以外にも残っていた
+# runtime package-manager依存」の一つ。baked前提の資産では同梱を検証する
+# のみでinstallは一切試みない。
+_REQUIRE_STRUCTURING_DEPS_BAKED = (
+    "(command -v tshark >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1) || "
+    "{ echo 'FATAL: required binary (tshark/python3) missing from image -- this is "
+    "a published image/build defect, not a transient install failure' >&2; exit 1; }"
+)
+
 
 class StructuringGenerationError(Exception):
     """構造化パイプライン生成時のエラー(structurerのIP未設定等)。"""
 
 
 def generate_structuring_commands(
-    structurer: Asset, instrumentation: Instrumentation, structuring: Structuring
+    structurer: Asset,
+    instrumentation: Instrumentation,
+    structuring: Structuring,
+    baked_dependencies: bool = False,
 ) -> list[str]:
     """structurer資産自身の起動コマンドに追加する、tshark+バルクローダーの
     コマンド列を返す。プロトコルが1件も宣言されていなければ空リスト
     (構造化パイプラインを起動する意味が無いため)。
+
+    `baked_dependencies`がTrueの場合、tshark/python3のruntime apt-get
+    フォールバックを持たないfail-closed版(`_REQUIRE_STRUCTURING_DEPS_BAKED`)
+    を使う。既定はFalseで、既存呼び出し元の生成結果は無変更のまま残る。
     """
     if not structuring.protocols:
         return []
@@ -65,7 +86,7 @@ def generate_structuring_commands(
         )
 
     commands: list[str] = [
-        _INSTALL_STRUCTURING_DEPS,
+        _REQUIRE_STRUCTURING_DEPS_BAKED if baked_dependencies else _INSTALL_STRUCTURING_DEPS,
         resolve_interface_snippet("STRUCT_IF", own_ip),
     ]
 

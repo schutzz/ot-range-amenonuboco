@@ -131,6 +131,21 @@ _INSTALL_IPROUTE2 = (
     "(command -v apk >/dev/null 2>&1 && apk add --no-cache -q iproute2 >/dev/null 2>&1)"
 )
 
+# _INSTALL_IPROUTE2 の fail-closed 版。build時に依存をbakeしたimage
+# (protocol-images/network-tools, protocol-images/network-tools-structurer、
+# またはそれらと同等のpinned image)を使う資産にのみ適用する。K8-3
+# k8-repro-20260916-001 root-cause post-mortemの結論を受け、baked image
+# 前提の資産についてはruntime apt-get/apkフォールバックそのものを持たない
+# ——baked imageであるにも関わらず`ip`/`tc`が見つからない場合は、その
+# image自体のbuild/publish欠陥であり、runtime installで救済しようとする
+# ことは、今回排除したmutable external dependency boundaryを再び開く
+# ことになるため、直ちにfail-closedする。
+_REQUIRE_IPROUTE2_BAKED = (
+    "(command -v ip >/dev/null 2>&1 && command -v tc >/dev/null 2>&1) || "
+    "{ echo 'FATAL: required binary (ip/tc) missing from image -- this is "
+    "a published image/build defect, not a transient install failure' >&2; exit 1; }"
+)
+
 # Phase12罠#057/#058: 自前command資産は`sh -c "..."`がコンテナのPID1として
 # 実行される。Linuxカーネルの仕様上、PID1はシグナルに未対応の(=trap未設定の)
 # ハンドラではデフォルト動作(SIGTERMなら終了)すら適用されず無条件に無視する
@@ -167,8 +182,17 @@ def _assemble_command(
     agent_cmds: list[str] | None = None,
     visualization_cmds: list[str] | None = None,
     impairment_cmds: list[str] | None = None,
+    baked_dependencies: bool = False,
 ) -> str | None:
     """各層のコマンド列を1本のshellコマンドに合成する。
+
+    `baked_dependencies`: この資産のimageが`ip`/`tc`をbuild時に同梱している
+    (protocol-images/network-tools等を参照している、またはimage_overridesで
+    差し替えられている)場合はTrue。Trueの場合、`_INSTALL_IPROUTE2`の
+    runtime apt-get/apkフォールバックではなく、`_REQUIRE_IPROUTE2_BAKED`
+    (fail-closedの存在確認のみ)を使う——バイナリが同梱されている前提を
+    崩さない。既定はFalseで、既存の全マニフェストの生成結果は無変更のまま
+    残る。
 
     実行順序: ミラーリング → ルーティング → アプリ起動 → 構造化パイプライン →
     検知プラグイン → agent → 可視化エンジン。構造化・検知プラグインは末尾が
@@ -204,7 +228,7 @@ def _assemble_command(
 
     parts: list[str] = []
     if mirroring_cmds or routing_cmds or structuring_cmds or impairment_cmds:
-        parts.append(_INSTALL_IPROUTE2)
+        parts.append(_REQUIRE_IPROUTE2_BAKED if baked_dependencies else _INSTALL_IPROUTE2)
         parts.extend(mirroring_cmds)
         parts.extend(routing_cmds)
         parts.extend(impairment_cmds)
@@ -297,11 +321,16 @@ def _structuring_commands_for_asset(
     instrumentation: Instrumentation | None,
     structuring: Structuring | None,
     resolved_cap_add: list[str],
+    baked_dependencies: bool = False,
 ) -> list[str]:
     """構造化パイプラインは、①instrumentation・structuring両層が宣言されて
     おり、②この資産が`structurer`ロールであり、③実際にNET_ADMINを保持して
     いる場合にのみ算出する(ミラーリング・ルーティングと同じ考え方、
     Phase3決定事項#45)。
+
+    `baked_dependencies`は`_service_block`から素通しし、
+    `generate_structuring_commands`が tshark/python3 のruntime
+    apt-getフォールバックを持つ版と持たない版のどちらを使うか決める。
     """
     if instrumentation is None or structuring is None:
         return []
@@ -309,7 +338,9 @@ def _structuring_commands_for_asset(
         return []
     if "NET_ADMIN" not in resolved_cap_add:
         return []
-    return generate_structuring_commands(asset, instrumentation, structuring)
+    return generate_structuring_commands(
+        asset, instrumentation, structuring, baked_dependencies
+    )
 
 
 def _detection_env_for_asset(detection: Detection | None, asset_name: str) -> list[str]:
@@ -321,11 +352,24 @@ def _detection_env_for_asset(detection: Detection | None, asset_name: str) -> li
     return plugin_environment(detection, asset_name)
 
 
+# build-context参照(相対path)のうち、build時に`ip`/`tc`等のnetwork toolsを
+# 同梱している既知のprotocol-images。ここに載っている資産は、生成する
+# コマンドがruntime apt-get/apkフォールバックを持たない
+# (`_REQUIRE_IPROUTE2_BAKED`/構造化版の対応する定数を使う)。
+_BAKED_DEPENDENCY_BUILD_CONTEXTS = frozenset(
+    {
+        "../protocol-images/network-tools",
+        "../protocol-images/network-tools-structurer",
+    }
+)
+
+
 def _service_block(
     asset: Asset,
     manifest: Manifest,
     presets: RolePresets,
     visualization_overlay: ComposeServiceOverlay | None,
+    image_overrides: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     topology = manifest.topology
     instrumentation = manifest.instrumentation
@@ -340,9 +384,24 @@ def _service_block(
     # コンテナが既に動いていると衝突する。Amenonuboco自身の目的(複数のサイバー
     # レンジを動的に立ち上げる)には根本的に不向きなため、Compose標準の
     # プロジェクトスコープ命名(<project>_<service>_<n>)に委ねる。
+    #
+    # image_overrides(呼び出し元がasset名をkeyに指定する、例: K8-3
+    # formal reproductionがpinned digest imageを要求する場合)が優先し、
+    # buildを一切行わずimage参照のみを持つ。無指定の資産は既存動作のまま
+    # (相対pathならbuild、そうでなければimage参照)。
+    #
+    # `baked_dependencies`は、image_overrideされているか、既知の
+    # baked-dependency build context(_BAKED_DEPENDENCY_BUILD_CONTEXTS)を
+    # 参照している場合にTrueになる——どちらの経路でも、生成コマンドは
+    # runtime apt-get/apkフォールバックを持たないfail-closed版を使う。
     service: dict[str, Any] = {}
-    if asset.image.startswith("./") or asset.image.startswith("../"):
+    baked_dependencies = False
+    if image_overrides and asset.name in image_overrides:
+        service["image"] = image_overrides[asset.name]
+        baked_dependencies = True
+    elif asset.image.startswith("./") or asset.image.startswith("../"):
         service["build"] = asset.image
+        baked_dependencies = asset.image in _BAKED_DEPENDENCY_BUILD_CONTEXTS
     else:
         service["image"] = asset.image
 
@@ -393,7 +452,7 @@ def _service_block(
     # の全てを担う想定のため)、構造化コマンドの有無自体が「この資産が自分の
     # 起動コマンドを持つかどうか」の判定に加わる(Phase3決定事項#45)。
     structuring_cmds = _structuring_commands_for_asset(
-        asset, instrumentation, structuring, resolved.cap_add
+        asset, instrumentation, structuring, resolved.cap_add, baked_dependencies
     )
 
     # 検知プラグイン・agentの起動コマンド(Phase4)。どちらも構造化と同じく
@@ -439,6 +498,7 @@ def _service_block(
         agent_cmds,
         visualization_cmds,
         impairment_cmds,
+        baked_dependencies,
     )
     if command:
         service["command"] = command
@@ -559,9 +619,19 @@ def _service_block(
     return service
 
 
-def generate_compose(manifest: Manifest, presets: RolePresets) -> dict[str, Any]:
+def generate_compose(
+    manifest: Manifest,
+    presets: RolePresets,
+    image_overrides: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """マニフェストのtopology層(+instrumentation/structuring層があれば
     計装・構造化も)から docker-compose.yml 相当の辞書を生成する。
+
+    `image_overrides`: 資産名(`Asset.name`)をkeyに、その資産のimage参照を
+    上書きする任意の辞書。呼び出し元(K8-3 formal reproduction等)が、
+    通常はlocal buildされる資産をpinned/publishedなimage参照へ差し替える
+    ための汎用機構——特定のconsumer(K8等)に固有の語彙をこの層には
+    持ち込まない。無指定時は既存動作と完全に同一。
     """
     topology = manifest.topology
     try:
@@ -572,7 +642,9 @@ def generate_compose(manifest: Manifest, presets: RolePresets) -> dict[str, Any]
             overlay = visualization_overlay_for_asset(
                 manifest, manifest.visualization, asset
             )
-            services[asset.name] = _service_block(asset, manifest, presets, overlay)
+            services[asset.name] = _service_block(
+                asset, manifest, presets, overlay, image_overrides
+            )
             if overlay is not None:
                 for local_name, cfg in overlay.configs.items():
                     # `configs`はDocker Compose全体で共有される名前空間の

@@ -31,7 +31,11 @@ topology:
   assets:
     - name: wan_router
       role: l3-router
-      image: debian:bullseye-slim
+      # iproute2をbuild時に同梱するprotocol-images/network-toolsを使う
+      # (K8-3 k8-repro-20260916-001 root-cause post-mortem: runtime
+      # apt-get installがtransitive dependencyのAPT取得失敗により
+      # restart-loopした欠陥の修正)。
+      image: ../protocol-images/network-tools
       networks:
         - { segment: cc_lan,       ip: 10.1.10.254 }
         - { segment: wan_link,     ip: 172.18.0.254 }
@@ -214,12 +218,17 @@ topology:
     - name: tap_observer
       # Phase2: mirror_linkへの単一接続の観測ノード。tcpdumpでミラーされた
       # トラフィックを直接確認する(前身ot-ids-verumのzeek_tap相当)。IPは動的割当。
+      # tcpdumpはprotocol-images/network-toolsへbuild時に同梱済み
+      # (K8-3 k8-repro-20260916-001 root-cause post-mortem)——
+      # overrides.command側の runtime apt-get は撤去し、同梱を検証する
+      # だけのfail-closed guardへ置き換えた。欠落時はruntime installで
+      # 救済せず即座に停止する(image自体のbuild/publish欠陥として扱う)。
       role: observer
-      image: debian:bullseye-slim
+      image: ../protocol-images/network-tools
       networks:
         - { segment: mirror_link }
       overrides:
-        command: "apt-get update -qq && apt-get install -y -qq tcpdump >/dev/null 2>&1 && tcpdump -i eth0 -nn"
+        command: "(command -v tcpdump >/dev/null 2>&1) || { echo 'FATAL: required binary tcpdump missing from image -- this is a published image/build defect, not a transient install failure' >&2; exit 1; } && tcpdump -i eth0 -nn"
 
     - name: log_structurer
       # Phase3: 構造化パイプライン(tshark+バルクローダー)実行ノード。
@@ -227,8 +236,11 @@ topology:
       # cc_lan(Elasticsearchへの書き込み)へのマルチホーム接続を持つ。
       # tsharkのapt-getインストールが非対話モードを要するため、Debian系
       # イメージのみを対象とする(Phase3決定事項#44の既知の制約)。
+      # tshark/python3をbuild時に同梱するprotocol-images/
+      # network-tools-structurerを使う(K8-3 k8-repro-20260916-001
+      # root-cause post-mortem)。
       role: structurer
-      image: debian:bullseye-slim
+      image: ../protocol-images/network-tools-structurer
       networks:
         - { segment: mirror_link, ip: 10.1.99.60 }
         - { segment: cc_lan,      ip: 10.1.10.60 }

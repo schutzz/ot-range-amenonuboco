@@ -38,7 +38,7 @@ window.AMENONUBOCO_SAMPLES = [
       "topology": {
         "assets": [
           {
-            "image": "debian:bullseye-slim",
+            "image": "../protocol-images/network-tools",
             "name": "wan_router",
             "networks": [
               {
@@ -294,7 +294,7 @@ window.AMENONUBOCO_SAMPLES = [
             "role": "detection-infra"
           },
           {
-            "image": "debian:bullseye-slim",
+            "image": "../protocol-images/network-tools",
             "name": "tap_observer",
             "networks": [
               {
@@ -304,7 +304,7 @@ window.AMENONUBOCO_SAMPLES = [
             ],
             "overrides": {
               "cap_add": null,
-              "command": "apt-get update -qq && apt-get install -y -qq tcpdump >/dev/null 2>&1 && tcpdump -i eth0 -nn",
+              "command": "(command -v tcpdump >/dev/null 2>&1) || { echo 'FATAL: required binary tcpdump missing from image -- this is a published image/build defect, not a transient install failure' >&2; exit 1; } && tcpdump -i eth0 -nn",
               "environment": [],
               "ports": [],
               "sysctls": null
@@ -312,7 +312,7 @@ window.AMENONUBOCO_SAMPLES = [
             "role": "observer"
           },
           {
-            "image": "debian:bullseye-slim",
+            "image": "../protocol-images/network-tools-structurer",
             "name": "log_structurer",
             "networks": [
               {

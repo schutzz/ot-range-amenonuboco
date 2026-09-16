@@ -26,6 +26,30 @@ from schema import ManifestLoadError, PresetLoadError, load_manifest, load_role_
 from tools.gen_gui_vocab import manifest_to_model
 
 
+def _parse_image_overrides(raw: list[str] | None) -> dict[str, str]:
+    """`--image-override NAME=REF`引数群を辞書へ変換する。
+
+    汎用機構(consumer固有の語彙を持たない): 呼び出し元は任意の資産名を
+    keyに、任意のimage参照(pinned digest等)へ差し替えられる。同一資産名
+    が複数回指定された場合は後勝ち。
+    """
+    overrides: dict[str, str] = {}
+    for entry in raw or []:
+        if "=" not in entry:
+            raise ValueError(
+                f"invalid --image-override '{entry}': expected NAME=REF"
+            )
+        name, ref = entry.split("=", 1)
+        name = name.strip()
+        ref = ref.strip()
+        if not name or not ref:
+            raise ValueError(
+                f"invalid --image-override '{entry}': expected NAME=REF"
+            )
+        overrides[name] = ref
+    return overrides
+
+
 def cmd_provision(args: argparse.Namespace) -> int:
     manifest_path = Path(args.manifest)
     output_path = Path(args.output) if args.output else manifest_path.with_name(
@@ -33,9 +57,15 @@ def cmd_provision(args: argparse.Namespace) -> int:
     )
 
     try:
+        image_overrides = _parse_image_overrides(args.image_override)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    try:
         manifest = load_manifest(manifest_path)
         presets = load_role_presets()
-        compose = generate_compose(manifest, presets)
+        compose = generate_compose(manifest, presets, image_overrides or None)
     except (ManifestLoadError, PresetLoadError, ComposeGenerationError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -134,6 +164,17 @@ def main() -> int:
     p_provision.add_argument("manifest", help="マニフェストファイル(YAML)のパス")
     p_provision.add_argument(
         "-o", "--output", help="出力先パス(既定: <manifest>.docker-compose.yml)"
+    )
+    p_provision.add_argument(
+        "-i",
+        "--image-override",
+        action="append",
+        metavar="NAME=REF",
+        help=(
+            "指定した資産名(NAME)のimage参照をREFへ差し替える"
+            "(build contextを使わず、REFをそのままpullする)。"
+            "繰り返し指定可。例: -i wan_router=ghcr.io/owner/img@sha256:..."
+        ),
     )
     p_provision.set_defaults(func=cmd_provision)
 
