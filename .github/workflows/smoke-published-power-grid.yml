@@ -100,7 +100,7 @@ jobs:
           router=$(docker compose -p "$project" -f "$file" ps -q wan_router)
           test -n "$router"
           docker exec "$router" sh -lc 'command -v ip; command -v tc; ip -br addr'
-          gateway_if=$(docker exec "$router" sh -lc "ip -o -4 addr show | awk '/10.1.20.254\\/24/ {print \\$2}' | head -n 1")
+          gateway_if=$(docker exec "$router" sh -lc "ip -o -4 addr show | grep -F '10.1.20.254/24' | tr -s ' ' | cut -d ' ' -f 2 | head -n 1")
           test -n "$gateway_if"
           docker exec "$router" tc qdisc show dev "$gateway_if"
           docker exec "$router" tc filter show dev "$gateway_if" parent ffff:
